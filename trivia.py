@@ -1,69 +1,92 @@
 import streamlit as st
 import pandas as pd
 import random
+import os
 
-st.set_page_config(page_title="Jeopardy! Pro Trainer", page_icon="🎓")
+st.set_page_config(page_title="Jeopardy! Pro Trainer", page_icon="🎓", layout="centered")
 
-# --- DATA LOADING (Fast & Offline) ---
+# --- DATA LOADING ---
 @st.cache_data
 def load_archive():
-    # This pulls a 120,000+ clue dataset directly from a high-speed mirror
-    url = "https://raw.githubusercontent.com/jwolle1/jeopardy_clue_dataset/master/jeopardy_questions.csv"
+    # Looks for the file in the same directory as this script
+    file_path = 'season41.tsv'
+    
+    if not os.path.exists(file_path):
+        return None
+    
     try:
-        # We sample it so it's fast on your iPhone
-        df = pd.read_csv(url).sample(5000) 
-        return df
+        # JWolle dataset uses Tab separation
+        df = pd.read_csv(file_path, sep='\t')
+        
+        # Mapping jwolle1 column names to our app logic:
+        # 'answer' = The Clue on the board
+        # 'question' = The Correct Response (e.g., "What is...")
+        # 'category' = The Category
+        # 'clue_value' = The Dollar amount
+        return df.dropna(subset=['answer', 'question'])
     except Exception as e:
-        st.error(f"Failed to fetch show data: {e}")
+        st.error(f"Error reading file: {e}")
         return None
 
 df = load_archive()
 
-# --- APP STATE ---
+# --- INITIALIZE SESSION STATE ---
 if 'idx' not in st.session_state:
     st.session_state.idx = 0
     st.session_state.show = False
     st.session_state.score = 0
 
-def get_new_clue():
+def get_next_clue():
     if df is not None:
         st.session_state.idx = random.randint(0, len(df) - 1)
         st.session_state.show = False
 
-# --- UI ---
-st.title("🏆 J-Archive Offline Trainer")
+# --- MAIN UI ---
+st.title("🏆 Jeopardy! Season 41 Trainer")
 
 if df is None:
-    st.error("Data file not found. Please upload 'season41.tsv' to your GitHub.")
+    st.error("❌ 'season41.tsv' not found!")
+    st.info("Please ensure 'season41.tsv' is uploaded to your GitHub repository in the same folder as this script.")
 else:
-    # First-time load
+    # Set the first clue if it's the start of the session
     if st.session_state.idx == 0 and not st.session_state.show:
-        get_new_clue()
+        get_next_clue()
 
     clue_data = df.iloc[st.session_state.idx]
     
-    st.info(f"CATEGORY: {str(clue_data['category']).upper()}")
-    st.subheader(clue_data['clue'])
-    st.caption(f"Season {clue_data.get('season', '??')} | Value: ${clue_data.get('value', 400)}")
+    # Extracting and cleaning data
+    # Note: In the TSV, 'answer' is the text the host reads
+    clue_text = str(clue_data['answer']) 
+    correct_response = str(clue_data['question'])
+    category = str(clue_data.get('category', 'UNCATEGORIZED')).upper()
+    value = clue_data.get('clue_value', 400)
+
+    # Display Board
+    st.info(f"CATEGORY: {category}")
+    st.markdown(f"### {clue_text}")
+    st.caption(f"Clue Value: ${value}")
 
     if not st.session_state.show:
-        if st.button("REVEAL ANSWER", type="primary"):
+        if st.button("REVEAL RESPONSE", type="primary"):
             st.session_state.show = True
             st.rerun()
     else:
-        st.success(f"RESPONSE: {str(clue_data['answer']).upper()}")
+        st.success(f"CORRECT RESPONSE: {correct_response.upper()}")
         
-        c1, c2 = st.columns(2)
-        with c1:
-            if st.button("✅ GOT IT"):
-                st.session_state.score += int(clue_data.get('value', 400))
-                get_new_clue()
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("✅ I WAS RIGHT"):
+                st.session_state.score += int(value or 400)
+                get_next_clue()
                 st.rerun()
-        with c2:
-            if st.button("❌ MISSED"):
-                st.session_state.score -= int(clue_data.get('value', 400))
-                get_new_clue()
+        with col2:
+            if st.button("❌ I WAS WRONG"):
+                st.session_state.score -= int(value or 400)
+                get_next_clue()
                 st.rerun()
 
-st.sidebar.metric("Bank", f"${st.session_state.score}")
-
+st.sidebar.metric("Career Earnings", f"${st.session_state.score}")
+if st.sidebar.button("Reset Game"):
+    st.session_state.score = 0
+    get_next_clue()
+    st.rerun()
