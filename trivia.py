@@ -51,7 +51,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- 3. DATA LOADING (CAPTURES SEASON # FROM FILENAME) ---
+# --- 3. DATA LOADING ---
 @st.cache_data
 def load_all_seasons():
     files = glob.glob("*.tsv")
@@ -62,7 +62,6 @@ def load_all_seasons():
     for f in files:
         try:
             temp_df = pd.read_csv(f, sep='\t', low_memory=False)
-            # Find the digits in the filename (e.g., season41.tsv -> 41)
             s_match = re.search(r'\d+', f)
             temp_df['season'] = s_match.group() if s_match else "??"
             all_chunks.append(temp_df)
@@ -100,7 +99,6 @@ def get_next():
 if df is None:
     st.error("No .tsv files found in the folder!")
 else:
-    # Ensure variables exist before the UI tries to use them
     if not st.session_state.initialized:
         get_next()
 
@@ -110,7 +108,6 @@ else:
     st.markdown(f'<div class="category-box"><div class="category-text">{clue["category"]}</div></div>', unsafe_allow_html=True)
     st.markdown(f"### {clue['answer']}")
     
-    # Season # and Tag info
     st.caption(f"Tag: **{u_cat}** | Season {clue['season']} | ${clue.get('clue_value', 400)}")
 
     if not st.session_state.show:
@@ -131,13 +128,3 @@ else:
             if st.button("❌ I MISSED IT", use_container_width=True):
                 st.session_state.stats[u_cat]["total"] += 1
                 get_next()
-                st.rerun()
-
-# --- 6. SIDEBAR STATS ---
-st.sidebar.title("📊 Accuracy Tracker")
-for cat, data in st.session_state.stats.items():
-    if data["total"] > 0:
-        acc = (data["correct"] / data["total"]) * 100
-        st.sidebar.write(f"**{cat}**")
-        st.sidebar.caption(f"{acc:.0f}% accuracy ({data['total']} seen)")
-        st.sidebar.progress(acc / 100)
