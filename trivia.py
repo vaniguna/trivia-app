@@ -290,7 +290,6 @@ if 'idx' not in st.session_state:
     st.session_state.show = False
     st.session_state.current_tag = "Other"
     st.session_state.initialized = False
-    st.session_state.reclassify_mode = False
 
 def get_next():
     if df is not None:
@@ -313,29 +312,21 @@ else:
 
     st.markdown(f'<div class="category-box"><div class="category-text">{clue["category"]}</div></div>', unsafe_allow_html=True)
     st.markdown(f"### {clue['answer']}")
+    st.caption(f"Season {clue['season']} | ${clue_value}")
 
-    # Tag row with optional reclassify toggle
-    tag_col, btn_col = st.columns([3, 1])
-    with tag_col:
-        st.caption(f"Tag: **{u_cat}** | Season {clue['season']} | ${clue_value}")
-    with btn_col:
-        if st.button("✏️ Retag", help="Override the auto-assigned study tag"):
-            st.session_state.reclassify_mode = not st.session_state.get('reclassify_mode', False)
-            st.rerun()
-
-    # Reclassify dropdown (shown inline when toggled)
-    if st.session_state.get('reclassify_mode', False):
-        sorted_tags = sorted([t for t in ALL_TAGS if t != "Other"]) + ["Other"]
-        new_tag = st.selectbox(
-            "Select correct study tag:",
-            options=sorted_tags,
-            index=sorted_tags.index(u_cat) if u_cat in sorted_tags else 0,
-            key="retag_select"
-        )
-        if new_tag != u_cat:
-            st.session_state.current_tag = new_tag
-            st.session_state.reclassify_mode = False
-            st.rerun()
+    # Always-visible tag selector
+    sorted_tags = sorted([t for t in ALL_TAGS if t != "Other"]) + ["Other"]
+    selected_tag = st.selectbox(
+        "Study Tag",
+        options=sorted_tags,
+        index=sorted_tags.index(u_cat) if u_cat in sorted_tags else 0,
+        key=f"retag_select_{st.session_state.idx}",
+        label_visibility="collapsed"
+    )
+    if selected_tag != st.session_state.current_tag:
+        st.session_state.current_tag = selected_tag
+        u_cat = selected_tag
+        st.rerun()
 
     if not st.session_state.show:
         if st.button("REVEAL RESPONSE", use_container_width=True):
@@ -350,14 +341,12 @@ else:
                 st.session_state.stats[u_cat]["correct"] += 1
                 st.session_state.stats[u_cat]["total"] += 1
                 st.session_state.winnings += clue_value
-                st.session_state.reclassify_mode = False
                 get_next()
                 st.rerun()
         with c2:
             if st.button("❌ I MISSED IT", use_container_width=True):
                 st.session_state.stats[u_cat]["total"] += 1
                 st.session_state.winnings -= clue_value
-                st.session_state.reclassify_mode = False
                 get_next()
                 st.rerun()
 
