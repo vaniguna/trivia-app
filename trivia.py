@@ -282,11 +282,15 @@ elif set(ALL_TAGS) - set(st.session_state.stats.keys()):
         if tag not in st.session_state.stats:
             st.session_state.stats[tag] = {"correct": 0, "total": 0}
 
+if 'winnings' not in st.session_state:
+    st.session_state.winnings = 0
+
 if 'idx' not in st.session_state:
     st.session_state.idx = 0
     st.session_state.show = False
     st.session_state.current_tag = "Other"
     st.session_state.initialized = False
+    st.session_state.reclassify_mode = False
 
 def get_next():
     if df is not None:
@@ -305,10 +309,33 @@ else:
 
     clue = df.iloc[st.session_state.idx]
     u_cat = st.session_state.current_tag
+    clue_value = int(clue.get('clue_value') or 400)
 
     st.markdown(f'<div class="category-box"><div class="category-text">{clue["category"]}</div></div>', unsafe_allow_html=True)
     st.markdown(f"### {clue['answer']}")
-    st.caption(f"Tag: **{u_cat}** | Season {clue['season']} | ${clue.get('clue_value', 400)}")
+
+    # Tag row with optional reclassify toggle
+    tag_col, btn_col = st.columns([3, 1])
+    with tag_col:
+        st.caption(f"Tag: **{u_cat}** | Season {clue['season']} | ${clue_value}")
+    with btn_col:
+        if st.button("✏️ Retag", help="Override the auto-assigned study tag"):
+            st.session_state.reclassify_mode = not st.session_state.get('reclassify_mode', False)
+            st.rerun()
+
+    # Reclassify dropdown (shown inline when toggled)
+    if st.session_state.get('reclassify_mode', False):
+        sorted_tags = sorted([t for t in ALL_TAGS if t != "Other"]) + ["Other"]
+        new_tag = st.selectbox(
+            "Select correct study tag:",
+            options=sorted_tags,
+            index=sorted_tags.index(u_cat) if u_cat in sorted_tags else 0,
+            key="retag_select"
+        )
+        if new_tag != u_cat:
+            st.session_state.current_tag = new_tag
+            st.session_state.reclassify_mode = False
+            st.rerun()
 
     if not st.session_state.show:
         if st.button("REVEAL RESPONSE", use_container_width=True):
@@ -316,17 +343,21 @@ else:
             st.rerun()
     else:
         st.success(f"RESPONSE: {str(clue['question']).upper()}")
-        
+
         c1, c2 = st.columns(2)
         with c1:
             if st.button("✅ I GOT IT", use_container_width=True):
                 st.session_state.stats[u_cat]["correct"] += 1
                 st.session_state.stats[u_cat]["total"] += 1
+                st.session_state.winnings += clue_value
+                st.session_state.reclassify_mode = False
                 get_next()
                 st.rerun()
         with c2:
             if st.button("❌ I MISSED IT", use_container_width=True):
                 st.session_state.stats[u_cat]["total"] += 1
+                st.session_state.winnings -= clue_value
+                st.session_state.reclassify_mode = False
                 get_next()
                 st.rerun()
 
@@ -335,7 +366,11 @@ st.sidebar.title("📊 Training Progress")
 
 total_correct = sum(d["correct"] for d in st.session_state.stats.values())
 total_seen = sum(d["total"] for d in st.session_state.stats.values())
-st.sidebar.metric("Total Correct", f"{total_correct} / {total_seen}")
+
+col_a, col_b = st.sidebar.columns(2)
+col_a.metric("Total Correct", f"{total_correct} / {total_seen}")
+winnings = st.session_state.get('winnings', 0)
+col_b.metric("Winnings", f"{'$' if winnings >= 0 else '-$'}{abs(winnings):,}")
 
 st.sidebar.divider()
 st.sidebar.subheader("Weakness Tracker")
@@ -349,4 +384,5 @@ for cat, data in st.session_state.stats.items():
 st.sidebar.divider()
 if st.sidebar.button("🔄 REFRESH ALL STATS", use_container_width=True):
     st.session_state.stats = {cat: {"correct": 0, "total": 0} for cat in ALL_TAGS}
+    st.session_state.winnings = 0
     st.rerun()
