@@ -25,7 +25,7 @@ def identify_universal_cat(row):
             return label
     return "Other"
 
-# --- CUSTOM CSS (Flat Blue, Slate Reveal) ---
+# --- CUSTOM CSS ---
 st.markdown("""
     <style>
     .category-box {
@@ -60,8 +60,9 @@ def load_all_data():
     for f in files:
         try:
             temp_df = pd.read_csv(f, sep='\t', low_memory=False)
-            s_num = "".join(filter(str.isdigit(f))) if any(c.isdigit() for c in f) else "Unknown"
-            temp_df['season_num'] = s_num
+            # Find digits in filename for season number
+            s_match = re.search(r'\d+', f)
+            temp_df['season_num'] = s_match.group() if s_match else "Unknown"
             all_data.append(temp_df)
         except: continue
     if not all_data: return None
@@ -84,22 +85,8 @@ def get_next_clue():
     if df is not None:
         st.session_state.idx = random.randint(0, len(df) - 1)
         st.session_state.show = False
-        next_row = df.iloc[st.session_state.idx]
-        st.session_state.current_tag = identify_universal_cat(next_row)
+        row = df.iloc[st.session_state.idx]
+        st.session_state.current_tag = identify_universal_cat(row)
 
 # --- MAIN APP ---
-if df is None:
-    st.error("No .tsv files found! Upload your season files to GitHub.")
-else:
-    # Handle first load
-    if st.session_state.idx == 0 and not st.session_state.show:
-        get_next_clue()
-        
-    clue = df.iloc[st.session_state.idx]
-
-    # Category Display
-    st.markdown(f'<div class="category-box"><div class="category-text">{clue["category"]}</div></div>', unsafe_allow_html=True)
-    st.markdown(f"### {clue['answer']}")
-    
-    # Study Tag Control
-    with st.expander(f"Study Tag
+if
