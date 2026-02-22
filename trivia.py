@@ -460,30 +460,22 @@ else:
     if timer_on and st.session_state.clue_start_time and not st.session_state.show:
         elapsed   = time.time() - st.session_state.clue_start_time
         time_left = max(0, timer_limit - elapsed)
-        if time_left == 0 and not timed_out:
-            st.session_state.timed_out = True
-            st.session_state.show = True
-            st.session_state.match_result = (False, 0)
-            st.session_state.user_answer = "⏰ Time's up!"
-            timed_out = True
-            st.rerun()
+        timed_out = st.session_state.get('timed_out', False)
 
     with header_right:
         if timer_on and not st.session_state.show:
-            color = "#22c55e" if time_left > timer_limit * 0.4 else ("#f59e0b" if time_left > timer_limit * 0.2 else "#ef4444")
+            elapsed_display = min(elapsed, timer_limit)
+            remaining = max(0, timer_limit - elapsed_display)
+            color = "#22c55e" if remaining > timer_limit * 0.4 else ("#f59e0b" if remaining > timer_limit * 0.2 else "#ef4444")
             st.markdown(
-                f'<div style="text-align:right;font-size:1.4rem;font-weight:bold;color:{color}">⏱ {time_left:.1f}s</div>',
+                f'<div style="text-align:right;font-size:1.4rem;font-weight:bold;color:{color}">⏱ {remaining:.0f}s</div>',
                 unsafe_allow_html=True
             )
 
-    # Timer progress bar
-    if timer_on and not st.session_state.show:
-        st.progress(time_left / timer_limit)
-        # Auto-refresh every second while timer running
-        st.markdown(
-            '<meta http-equiv="refresh" content="1">',
-            unsafe_allow_html=True
-        )
+    # Timer progress bar - static display, no auto-refresh
+    # Timer expires are caught when the user submits or on next natural rerun
+    if timer_on and not st.session_state.show and not timed_out:
+        st.progress(max(0.0, time_left / timer_limit))
 
     # ── CLUE DISPLAY ──────────────────────────────────────────────────────
     st.markdown(f'<div class="category-box"><div class="category-text">{clue["category"]}</div></div>', unsafe_allow_html=True)
@@ -512,15 +504,21 @@ else:
                 value=st.session_state.get("user_answer", ""),
                 placeholder="Type your response and press Enter or Check Answer...",
                 key=f"ans_input_{st.session_state.idx}",
-                disabled=timed_out,
             )
-            if st.button("CHECK ANSWER", use_container_width=True, type="primary", disabled=timed_out):
-                is_correct, score = fuzzy_match(
-                    user_ans, correct_response,
-                    threshold=st.session_state.settings["close_enough_threshold"]
-                )
-                st.session_state.user_answer = user_ans
-                st.session_state.match_result = (is_correct, score)
+            if st.button("CHECK ANSWER", use_container_width=True, type="primary"):
+                # Re-check elapsed at submission time
+                elapsed_now = time.time() - st.session_state.clue_start_time if st.session_state.clue_start_time else 0
+                if timer_on and elapsed_now > timer_limit:
+                    st.session_state.timed_out = True
+                    st.session_state.user_answer = user_ans or "⏰ Time's up!"
+                    st.session_state.match_result = (False, 0)
+                else:
+                    is_correct, score = fuzzy_match(
+                        user_ans, correct_response,
+                        threshold=st.session_state.settings["close_enough_threshold"]
+                    )
+                    st.session_state.user_answer = user_ans
+                    st.session_state.match_result = (is_correct, score)
                 st.session_state.show = True
                 st.rerun()
         else:
