@@ -8,7 +8,7 @@ import os
 st.set_page_config(page_title="Jeopardy! Pro Trainer", page_icon="🎓", layout="centered")
 
 # --- 1. BOARD CATEGORY ENGINE ---
-# This now looks specifically at the 'category' field from the board
+# Mapping board categories to study tags
 UNIVERSAL_MAP = {
     "Vietnam War": r"vietnam|saigon|hanoi|viet cong",
     "Revolutionary War": r"revolutionary war|lexington|saratoga|yorktown|cornwallis",
@@ -20,10 +20,9 @@ UNIVERSAL_MAP = {
     "Science": r"molecule|element|physics|biology|chemistry"
 }
 
-def identify_universal_cat(row):
-    # CHANGED: Now only pulls from the actual board category name
+def identify_universal_tag(row):
+    # Only checks the actual board category as requested
     category_text = str(row.get('category', '')).lower()
-    
     for label, pattern in UNIVERSAL_MAP.items():
         if re.search(pattern, category_text):
             return label
@@ -88,29 +87,30 @@ if 'idx' not in st.session_state:
     st.session_state.idx = 0
     st.session_state.show = False
     st.session_state.current_tag = "Other"
-    st.session_state.initialized = False
+    st.session_state.ready = False
 
 def get_next():
     if df is not None:
         st.session_state.idx = random.randint(0, len(df) - 1)
         st.session_state.show = False
         row = df.iloc[st.session_state.idx]
-        st.session_state.current_tag = identify_universal_cat(row)
-        st.session_state.initialized = True
+        st.session_state.current_tag = identify_universal_tag(row)
+        st.session_state.ready = True
 
 # --- 5. MAIN UI ---
 if df is None:
-    st.error("No .tsv files found in the folder!")
+    st.error("No .tsv files found in the directory!")
 else:
-    if not st.session_state.initialized:
+    if not st.session_state.ready:
         get_next()
 
     clue = df.iloc[st.session_state.idx]
-    u_cat = st.session_state.current_tag
+    u_tag = st.session_state.current_tag
 
+    # Clue Header
     st.markdown(f'<div class="category-box"><div class="category-text">{clue["category"]}</div></div>', unsafe_allow_html=True)
     st.markdown(f"### {clue['answer']}")
-    st.caption(f"Study Tag: **{u_cat}** | Season {clue['season']} | ${clue.get('clue_value', 400)}")
+    st.caption(f"Study Tag: **{u_tag}** | Season {clue['season']} | ${clue.get('clue_value', 400)}")
 
     if not st.session_state.show:
         if st.button("REVEAL RESPONSE", use_container_width=True):
@@ -122,39 +122,3 @@ else:
         c1, c2 = st.columns(2)
         with c1:
             if st.button("✅ I GOT IT", use_container_width=True):
-                st.session_state.stats[u_cat]["correct"] += 1
-                st.session_state.stats[u_cat]["total"] += 1
-                get_next()
-                st.rerun()
-        with c2:
-            if st.button("❌ I MISSED IT", use_container_width=True):
-                st.session_state.stats[u_cat]["total"] += 1
-                get_next()
-                st.rerun()
-
-# --- 6. SIDEBAR (WEAKNESS TRACKER & REFRESH) ---
-st.sidebar.title("📊 Training Progress")
-
-# Total Score Metric
-total_correct = sum(d["correct"] for d in st.session_state.stats.values())
-total_seen = sum(d["total"] for d in st.session_state.stats.values())
-st.sidebar.metric("Total Correct Clues", f"{total_correct} / {total_seen}")
-
-st.sidebar.divider()
-st.sidebar.subheader("Weakness Tracker")
-for cat, data in st.sidebar.container().items(): # Iterating through categories
-    # Sort categories to show ones you have seen first
-    sorted_stats = dict(sorted(st.session_state.stats.items(), key=lambda item: item[1]['total'], reverse=True))
-
-for cat, data in sorted_stats.items():
-    if data["total"] > 0:
-        acc = (data["correct"] / data["total"]) * 100
-        st.sidebar.write(f"**{cat}**")
-        st.sidebar.progress(acc / 100)
-        st.sidebar.caption(f"{acc:.0f}% accuracy ({data['total']} clues seen)")
-
-st.sidebar.divider()
-if st.sidebar.button("🔄 REFRESH ALL STATS", use_container_width=True):
-    st.session_state.stats = {cat: {"correct": 0, "total": 0} for cat in UNIVERSAL_MAP}
-    st.session_state.stats["Other"] = {"correct": 0, "total": 0}
-    st.rerun()
