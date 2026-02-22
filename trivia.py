@@ -348,20 +348,23 @@ if 'idx' not in st.session_state:
     st.session_state.timed_out = False      # True if timer expired on this clue
 
 DIFFICULTY_RANGES = {
-    "All":              (0, 999999),
-    "Easy ($200–$600)": (0, 600),
-    "Medium ($800–$1200)": (800, 1200),
-    "Hard ($1600+)":    (1600, 999999),
+    "All":                  (0, 999999),
+    "Easy ($200–$600)":     (200, 600),
+    "Medium ($800–$1200)":  (800, 1200),
+    "Hard ($1600+)":        (1600, 999999),
+    "Final Jeopardy":       None,          # special: filter by round == 3
 }
 
 def get_filtered_pool():
     if df is None:
         return None
-    lo, hi = DIFFICULTY_RANGES[st.session_state.settings["difficulty"]]
-    pool = df[df['clue_value'].apply(
-        lambda v: lo <= int(v or 0) <= hi
-    )]
-    return pool if len(pool) > 0 else df   # fallback to full set if filter yields nothing
+    diff = st.session_state.settings["difficulty"]
+    if diff == "Final Jeopardy":
+        pool = df[df.get('round', pd.Series(dtype=int)) == 3] if 'round' in df.columns else df[df['clue_value'].apply(lambda v: int(v or 0) == 0)]
+    else:
+        lo, hi = DIFFICULTY_RANGES[diff]
+        pool = df[df['clue_value'].apply(lambda v: lo <= int(v or 0) <= hi)]
+    return pool if len(pool) > 0 else df
 
 import time
 
@@ -603,8 +606,11 @@ diff_choice = st.sidebar.radio(
 )
 if diff_choice != st.session_state.settings["difficulty"]:
     st.session_state.settings["difficulty"] = diff_choice
-    get_next()   # immediately fetch a clue from the new pool
+    get_next()
     st.rerun()
+
+if st.session_state.settings["difficulty"] == "Final Jeopardy":
+    st.sidebar.caption("🎯 These are single, high-stakes clues — one per episode. Great for simulating pressure situations.")
 
 st.sidebar.divider()
 
