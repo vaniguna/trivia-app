@@ -5,7 +5,7 @@ import glob
 import re
 import os
 
-st.set_page_config(page_title="Jeopardy! Pro", page_icon="🏆", layout="centered")
+st.set_page_config(page_title="Jeopardy! Pro Trainer", page_icon="🏆", layout="centered")
 
 # --- 1. BOARD CATEGORY ENGINE ---
 # Mapping board categories to study tags strictly by category name
@@ -21,76 +21,91 @@ TAG_MAP = {
 }
 
 def get_study_tag(row):
-    # Strictly works off the actual board category
-    cat_text = str(row.get('category', '')).lower()
+    category_text = str(row.get('category', '')).lower()
     for label, pattern in TAG_MAP.items():
-        if re.search(pattern, cat_text):
+        if re.search(pattern, category_text):
             return label
     return "Other"
 
-# --- 2. STABLE DATA LOADER ---
+# --- 2. CUSTOM CSS ---
+st.markdown("""
+    <style>
+    .category-box {
+        background-color: #060ce9;
+        color: white;
+        padding: 20px;
+        border-radius: 10px;
+        text-align: center;
+        margin-bottom: 25px;
+    }
+    .category-text {
+        font-family: 'Arial Black', sans-serif;
+        font-weight: bold;
+        font-size: 28px;
+        text-transform: uppercase;
+    }
+    div.stButton > button:first-child {
+        background-color: #475569 !important;
+        color: white !important;
+        border: none !important;
+    }
+    </style>
+""", unsafe_allow_html=True)
+
+# --- 3. DATA LOADING (SEASON CAPTURE) ---
 @st.cache_data
-def load_local_data():
+def load_all_seasons():
     files = glob.glob("*.tsv")
     if not files:
         return None
     
-    chunks = []
+    all_chunks = []
     for f in files:
         try:
-            temp = pd.read_csv(f, sep='\t', low_memory=False)
-            # Pull season number from filename (e.g., season40.tsv)
-            match = re.search(r'\d+', f)
-            temp['season'] = match.group() if match else "??"
-            chunks.append(temp)
+            temp_df = pd.read_csv(f, sep='\t', low_memory=False)
+            # Find the digits in the filename (e.g., season41.tsv -> 41)
+            s_match = re.search(r'\d+', f)
+            temp_df['season'] = s_match.group() if s_match else "??"
+            all_chunks.append(temp_df)
         except:
             continue
-    
-    if not chunks:
+            
+    if not all_chunks:
         return None
-    full_df = pd.concat(chunks, ignore_index=True)
-    return full_df.dropna(subset=['answer', 'question']).sample(frac=1).reset_index(drop=True)
+    
+    df = pd.concat(all_chunks, ignore_index=True)
+    return df.dropna(subset=['answer', 'question']).sample(frac=1).reset_index(drop=True)
 
-df = load_local_data()
+df = load_all_seasons()
 
-# --- 3. STATE INITIALIZATION ---
+# --- 4. STATE MANAGEMENT ---
 if 'stats' not in st.session_state:
-    st.session_state.stats = {cat: {"ok": 0, "total": 0} for cat in TAG_MAP}
-    st.session_state.stats["Other"] = {"ok": 0, "total": 0}
+    st.session_state.stats = {cat: {"correct": 0, "total": 0} for cat in TAG_MAP}
+    st.session_state.stats["Other"] = {"correct": 0, "total": 0}
 
 if 'idx' not in st.session_state:
     st.session_state.idx = 0
-    st.session_state.reveal = False
+    st.session_state.show = False
     st.session_state.current_tag = "Other"
+    st.session_state.ready = False
 
-def next_clue():
+def get_next():
     if df is not None:
-        st.session_state.idx = random.randint(0, len(df)-1)
-        st.session_state.reveal = False
+        st.session_state.idx = random.randint(0, len(df) - 1)
+        st.session_state.show = False
         row = df.iloc[st.session_state.idx]
         st.session_state.current_tag = get_study_tag(row)
+        st.session_state.ready = True
 
-# --- 4. UI AND CLUE DISPLAY ---
+# --- 5. MAIN UI ---
 if df is None:
-    st.error("No clue files found! Please ensure your .tsv files are in the same folder.")
+    st.error("No .tsv files found in the directory! Ensure your season files are present.")
 else:
-    # Set initial clue
-    if st.session_state.idx == 0 and not st.session_state.reveal and 'init' not in st.session_state:
-        st.session_state.init = True
-        next_clue()
+    if not st.session_state.ready:
+        get_next()
 
     clue = df.iloc[st.session_state.idx]
-    tag = st.session_state.current_tag
+    u_tag = st.session_state.current_tag
 
-    # Styling the header
-    st.markdown(f"""
-        <div style="background-color: #060ce9; color: white; padding: 20px; border-radius: 10px; text-align: center; margin-bottom: 20px;">
-            <h1 style="margin:0; font-family: sans-serif; text-transform: uppercase;">{clue['category']}</h1>
-        </div>
-    """, unsafe_allow_html=True)
-
-    st.subheader(clue['answer'])
-    st.caption(f"Study Tag: **{tag}** | Season {clue['season']} | ${clue.get('clue_value', 400)}")
-
-    if not st.session_state.reveal:
-        if st.button("REVEAL RESPONSE", use_container_width=True, type="primary"):
+    # Header and Answer
+    st.markdown(f'<div class="category-box"><div class="category-
