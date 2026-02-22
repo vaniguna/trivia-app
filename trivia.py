@@ -25,7 +25,7 @@ def identify_universal_cat(row):
             return label
     return "Other"
 
-# --- CUSTOM CSS (Updated: Flat Blue, No Gold, Slate Reveal) ---
+# --- CUSTOM CSS (Flat Blue, Slate Reveal) ---
 st.markdown("""
     <style>
     .category-box {
@@ -35,7 +35,6 @@ st.markdown("""
         border-radius: 8px;
         text-align: center;
         margin-bottom: 25px;
-        /* Removed gold border for cleaner look */
     }
     .category-text {
         font-family: 'Arial Black', sans-serif;
@@ -44,7 +43,7 @@ st.markdown("""
         letter-spacing: 1px;
         text-transform: uppercase;
     }
-    /* Slate Grey Reveal Button to prevent clashing */
+    /* Slate Grey Reveal Button */
     div.stButton > button:first-child {
         background-color: #475569 !important;
         color: white !important;
@@ -61,8 +60,8 @@ def load_all_data():
     for f in files:
         try:
             temp_df = pd.read_csv(f, sep='\t', low_memory=False)
-            s_num = "".join(filter(str.isdigit, f))
-            temp_df['season_num'] = s_num if s_num else "Unknown"
+            s_num = "".join(filter(str.isdigit(f))) if any(c.isdigit() for c in f) else "Unknown"
+            temp_df['season_num'] = s_num
             all_data.append(temp_df)
         except: continue
     if not all_data: return None
@@ -79,4 +78,28 @@ if 'stats' not in st.session_state:
 if 'idx' not in st.session_state:
     st.session_state.idx = 0
     st.session_state.show = False
-    st.session_state.
+    st.session_state.current_tag = "Other"
+
+def get_next_clue():
+    if df is not None:
+        st.session_state.idx = random.randint(0, len(df) - 1)
+        st.session_state.show = False
+        next_row = df.iloc[st.session_state.idx]
+        st.session_state.current_tag = identify_universal_cat(next_row)
+
+# --- MAIN APP ---
+if df is None:
+    st.error("No .tsv files found! Upload your season files to GitHub.")
+else:
+    # Handle first load
+    if st.session_state.idx == 0 and not st.session_state.show:
+        get_next_clue()
+        
+    clue = df.iloc[st.session_state.idx]
+
+    # Category Display
+    st.markdown(f'<div class="category-box"><div class="category-text">{clue["category"]}</div></div>', unsafe_allow_html=True)
+    st.markdown(f"### {clue['answer']}")
+    
+    # Study Tag Control
+    with st.expander(f"Study Tag
