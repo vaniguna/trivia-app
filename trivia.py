@@ -25,43 +25,53 @@ def identify_universal_cat(row):
             return label
     return "Other"
 
-# --- CUSTOM CSS ---
+# --- CUSTOM CSS (Updated: Flat Blue, No Gold, Slate Reveal) ---
 st.markdown("""
     <style>
     .category-box {
         background-color: #060ce9;
         color: white;
         padding: 20px;
-        border-radius: 10px;
+        border-radius: 8px;
         text-align: center;
         margin-bottom: 25px;
+        /* Removed gold border for cleaner look */
     }
     .category-text {
         font-family: 'Arial Black', sans-serif;
         font-weight: bold;
-        font-size: 24px;
+        font-size: 26px;
         letter-spacing: 1px;
         text-transform: uppercase;
     }
+    /* Slate Grey Reveal Button to prevent clashing */
     div.stButton > button:first-child {
-        background-color: #475569;
-        color: white;
-        border: none;
+        background-color: #475569 !important;
+        color: white !important;
+        border: none !important;
     }
     </style>
 """, unsafe_allow_html=True)
 
-@st.cache_data
-def load_and_tag_data():
+@st.cache_data(show_spinner="Shuffling Archive...")
+def load_all_data():
     files = glob.glob("*.tsv")
     if not files: return None
-    all_df = pd.concat([pd.read_csv(f, sep='\t', low_memory=False) for f in files])
-    all_df = all_df.dropna(subset=['answer', 'question'])
-    return all_df.sample(frac=1).reset_index(drop=True)
+    all_data = []
+    for f in files:
+        try:
+            temp_df = pd.read_csv(f, sep='\t', low_memory=False)
+            s_num = "".join(filter(str.isdigit, f))
+            temp_df['season_num'] = s_num if s_num else "Unknown"
+            all_data.append(temp_df)
+        except: continue
+    if not all_data: return None
+    df = pd.concat(all_data, ignore_index=True)
+    return df.dropna(subset=['answer', 'question']).sample(frac=1).reset_index(drop=True)
 
-df = load_and_tag_data()
+df = load_all_data()
 
-# --- STATE ---
+# --- STATE MANAGEMENT ---
 if 'stats' not in st.session_state:
     st.session_state.stats = {cat: {"correct": 0, "total": 0} for cat in UNIVERSAL_MAP}
     st.session_state.stats["Other"] = {"correct": 0, "total": 0}
@@ -69,18 +79,4 @@ if 'stats' not in st.session_state:
 if 'idx' not in st.session_state:
     st.session_state.idx = 0
     st.session_state.show = False
-    st.session_state.current_tag = "Other"
-
-def get_next():
-    st.session_state.idx = random.randint(0, len(df)-1)
-    st.session_state.show = False
-    # Pre-tag the next clue
-    clue = df.iloc[st.session_state.idx]
-    st.session_state.current_tag = identify_universal_cat(clue)
-
-# --- UI ---
-if df is not None:
-    if st.session_state.idx == 0 and not st.session_state.show:
-        get_next()
-        
-    cl
+    st.session_state.
