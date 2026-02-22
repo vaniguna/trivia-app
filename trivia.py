@@ -7,7 +7,7 @@ import os
 
 st.set_page_config(page_title="Jeopardy! Pro Trainer", page_icon="🎓", layout="centered")
 
-# --- UNIVERSAL CATEGORY ENGINE ---
+# --- 1. STUDY TAG ENGINE ---
 UNIVERSAL_MAP = {
     "Vietnam War": r"vietnam|saigon|hanoi|viet cong",
     "Revolutionary War": r"revolutionary war|lexington|saratoga|yorktown|cornwallis",
@@ -26,7 +26,7 @@ def identify_universal_cat(row):
             return label
     return "Other"
 
-# --- CUSTOM CSS ---
+# --- 2. CUSTOM CSS ---
 st.markdown("""
     <style>
     .category-box {
@@ -43,7 +43,6 @@ st.markdown("""
         font-size: 28px;
         text-transform: uppercase;
     }
-    /* Slate Grey Reveal Button */
     div.stButton > button:first-child {
         background-color: #475569 !important;
         color: white !important;
@@ -52,7 +51,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- DATA LOADING (FIXED TO CAPTURE SEASON) ---
+# --- 3. DATA LOADING (CAPTURES SEASON # FROM FILENAME) ---
 @st.cache_data
 def load_all_seasons():
     files = glob.glob("*.tsv")
@@ -63,7 +62,7 @@ def load_all_seasons():
     for f in files:
         try:
             temp_df = pd.read_csv(f, sep='\t', low_memory=False)
-            # Extract Season Number from filename (e.g., season41.tsv -> 41)
+            # Find the digits in the filename (e.g., season41.tsv -> 41)
             s_match = re.search(r'\d+', f)
             temp_df['season'] = s_match.group() if s_match else "??"
             all_chunks.append(temp_df)
@@ -78,7 +77,7 @@ def load_all_seasons():
 
 df = load_all_seasons()
 
-# --- STATE MANAGEMENT ---
+# --- 4. STATE MANAGEMENT ---
 if 'stats' not in st.session_state:
     st.session_state.stats = {cat: {"correct": 0, "total": 0} for cat in UNIVERSAL_MAP}
     st.session_state.stats["Other"] = {"correct": 0, "total": 0}
@@ -87,8 +86,58 @@ if 'idx' not in st.session_state:
     st.session_state.idx = 0
     st.session_state.show = False
     st.session_state.current_tag = "Other"
-    st.session_state.ready = False
+    st.session_state.initialized = False
 
 def get_next():
     if df is not None:
-        st.session_state.idx = random.
+        st.session_state.idx = random.randint(0, len(df) - 1)
+        st.session_state.show = False
+        row = df.iloc[st.session_state.idx]
+        st.session_state.current_tag = identify_universal_cat(row)
+        st.session_state.initialized = True
+
+# --- 5. MAIN UI ---
+if df is None:
+    st.error("No .tsv files found in the folder!")
+else:
+    # Ensure variables exist before the UI tries to use them
+    if not st.session_state.initialized:
+        get_next()
+
+    clue = df.iloc[st.session_state.idx]
+    u_cat = st.session_state.current_tag
+
+    st.markdown(f'<div class="category-box"><div class="category-text">{clue["category"]}</div></div>', unsafe_allow_html=True)
+    st.markdown(f"### {clue['answer']}")
+    
+    # Season # and Tag info
+    st.caption(f"Tag: **{u_cat}** | Season {clue['season']} | ${clue.get('clue_value', 400)}")
+
+    if not st.session_state.show:
+        if st.button("REVEAL RESPONSE", use_container_width=True):
+            st.session_state.show = True
+            st.rerun()
+    else:
+        st.success(f"RESPONSE: {str(clue['question']).upper()}")
+        
+        c1, c2 = st.columns(2)
+        with c1:
+            if st.button("✅ I GOT IT", use_container_width=True):
+                st.session_state.stats[u_cat]["correct"] += 1
+                st.session_state.stats[u_cat]["total"] += 1
+                get_next()
+                st.rerun()
+        with c2:
+            if st.button("❌ I MISSED IT", use_container_width=True):
+                st.session_state.stats[u_cat]["total"] += 1
+                get_next()
+                st.rerun()
+
+# --- 6. SIDEBAR STATS ---
+st.sidebar.title("📊 Accuracy Tracker")
+for cat, data in st.session_state.stats.items():
+    if data["total"] > 0:
+        acc = (data["correct"] / data["total"]) * 100
+        st.sidebar.write(f"**{cat}**")
+        st.sidebar.caption(f"{acc:.0f}% accuracy ({data['total']} seen)")
+        st.sidebar.progress(acc / 100)
