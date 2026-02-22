@@ -3,74 +3,72 @@ import pandas as pd
 import random
 import glob
 import re
+import os
 
-st.set_page_config(page_title="Jeopardy! Pro Trainer", page_icon="🎓", layout="centered")
+st.set_page_config(page_title="Jeopardy! Pro Trainer", page_icon="🎓")
 
-# --- UNIVERSAL CATEGORY ENGINE ---
-UNIVERSAL_MAP = {
-    "Vietnam War": r"vietnam|saigon|hanoi|viet cong",
-    "Revolutionary War": r"revolutionary war|lexington|saratoga|yorktown|cornwallis",
-    "Canadian History": r"canada|ottawa|toronto|quebec|hudson's bay|prime minister",
-    "European Mountains": r"alps|pyrenees|carpathians|caucasus|mont blanc|matterhorn",
-    "Asian Rivers": r"mekong|yangtze|ganges|indus|yellow river|brahmaputra",
-    "U.S. Presidents": r"president|white house|potus",
-    "Shakespeare": r"shakespeare|hamlet|macbeth|othello|bard",
-    "Science": r"molecule|element|physics|biology|chemistry"
-}
+# --- DEBUGGING: Show files in directory to screen if logs are empty ---
+with st.sidebar:
+    if st.checkbox("Debug: Show Files"):
+        st.write("Current Directory Files:", os.listdir("."))
 
-def identify_universal_cat(row):
-    text = f"{row.get('category', '')} {row.get('answer', '')}".lower()
-    for label, pattern in UNIVERSAL_MAP.items():
-        if re.search(pattern, text):
-            return label
-    return "Other"
-
-# --- CUSTOM CSS ---
-st.markdown("""
-    <style>
-    .category-box {
-        background-color: #060ce9;
-        color: white;
-        padding: 20px;
-        border-radius: 8px;
-        text-align: center;
-        margin-bottom: 25px;
-    }
-    .category-text {
-        font-family: 'Arial Black', sans-serif;
-        font-weight: bold;
-        font-size: 26px;
-        letter-spacing: 1px;
-        text-transform: uppercase;
-    }
-    /* Slate Grey Reveal Button */
-    div.stButton > button:first-child {
-        background-color: #475569 !important;
-        color: white !important;
-        border: none !important;
-    }
-    </style>
-""", unsafe_allow_html=True)
-
-@st.cache_data(show_spinner="Shuffling Archive...")
+# --- DATA LOADING ---
+@st.cache_data(show_spinner="Loading Data...")
 def load_all_data():
-    files = glob.glob("*.tsv")
+    # Force search in current directory
+    path = os.path.join(os.getcwd(), "*.tsv")
+    files = glob.glob(path)
+    
+    if not files:
+        # Fallback check for standard relative path
+        files = glob.glob("*.tsv")
+        
     if not files:
         return None
+        
     all_data = []
     for f in files:
         try:
+            # Explicitly setting low_memory=False to prevent silent crashes
             temp_df = pd.read_csv(f, sep='\t', low_memory=False)
+            
+            # Extract Season Number
             s_match = re.search(r'\d+', f)
             temp_df['season_num'] = s_match.group() if s_match else "Unknown"
+            
             all_data.append(temp_df)
-        except Exception:
+        except Exception as e:
+            st.error(f"Error loading {f}: {e}")
             continue
+            
     if not all_data:
         return None
+        
     df = pd.concat(all_data, ignore_index=True)
     return df.dropna(subset=['answer', 'question']).sample(frac=1).reset_index(drop=True)
 
+# Try to load the data
 df = load_all_data()
 
-# --- STATE MANAGEMENT
+# --- APP START ---
+if df is None:
+    st.error("🚨 No .tsv files found in the repository!")
+    st.info("Check your GitHub: Are 'season40.tsv' and 'season41.tsv' in the root folder?")
+    st.stop() # Prevents further execution to stop the "blank screen"
+
+# --- REST OF THE LOGIC ---
+if 'idx' not in st.session_state:
+    st.session_state.idx = random.randint(0, len(df) - 1)
+    st.session_state.show = False
+    st.session_state.score = 0
+
+# (Your UI code below this...)
+st.title("🏆 Jeopardy! Pro Trainer")
+clue = df.iloc[st.session_state.idx]
+
+st.info(f"CATEGORY: {clue['category']}")
+st.write(f"### {clue['answer']}")
+st.caption(f"Season: {clue['season_num']}")
+
+if st.button("REVEAL"):
+    st.success(f"RESPONSE: {clue['question']}")
