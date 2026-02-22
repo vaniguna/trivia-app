@@ -7,7 +7,8 @@ import os
 
 st.set_page_config(page_title="Jeopardy! Pro Trainer", page_icon="🎓", layout="centered")
 
-# --- 1. STUDY TAG ENGINE ---
+# --- 1. BOARD CATEGORY ENGINE ---
+# This now looks specifically at the 'category' field from the board
 UNIVERSAL_MAP = {
     "Vietnam War": r"vietnam|saigon|hanoi|viet cong",
     "Revolutionary War": r"revolutionary war|lexington|saratoga|yorktown|cornwallis",
@@ -20,9 +21,11 @@ UNIVERSAL_MAP = {
 }
 
 def identify_universal_cat(row):
-    text = f"{row.get('category', '')} {row.get('answer', '')}".lower()
+    # CHANGED: Now only pulls from the actual board category name
+    category_text = str(row.get('category', '')).lower()
+    
     for label, pattern in UNIVERSAL_MAP.items():
-        if re.search(pattern, text):
+        if re.search(pattern, category_text):
             return label
     return "Other"
 
@@ -107,7 +110,7 @@ else:
 
     st.markdown(f'<div class="category-box"><div class="category-text">{clue["category"]}</div></div>', unsafe_allow_html=True)
     st.markdown(f"### {clue['answer']}")
-    st.caption(f"Tag: **{u_cat}** | Season {clue['season']} | ${clue.get('clue_value', 400)}")
+    st.caption(f"Study Tag: **{u_cat}** | Season {clue['season']} | ${clue.get('clue_value', 400)}")
 
     if not st.session_state.show:
         if st.button("REVEAL RESPONSE", use_container_width=True):
@@ -135,16 +138,20 @@ st.sidebar.title("📊 Training Progress")
 # Total Score Metric
 total_correct = sum(d["correct"] for d in st.session_state.stats.values())
 total_seen = sum(d["total"] for d in st.session_state.stats.values())
-st.sidebar.metric("Total Correct", f"{total_correct} / {total_seen}")
+st.sidebar.metric("Total Correct Clues", f"{total_correct} / {total_seen}")
 
 st.sidebar.divider()
 st.sidebar.subheader("Weakness Tracker")
-for cat, data in st.session_state.stats.items():
+for cat, data in st.sidebar.container().items(): # Iterating through categories
+    # Sort categories to show ones you have seen first
+    sorted_stats = dict(sorted(st.session_state.stats.items(), key=lambda item: item[1]['total'], reverse=True))
+
+for cat, data in sorted_stats.items():
     if data["total"] > 0:
         acc = (data["correct"] / data["total"]) * 100
         st.sidebar.write(f"**{cat}**")
         st.sidebar.progress(acc / 100)
-        st.sidebar.caption(f"{acc:.0f}% accuracy ({data['total']} clues)")
+        st.sidebar.caption(f"{acc:.0f}% accuracy ({data['total']} clues seen)")
 
 st.sidebar.divider()
 if st.sidebar.button("🔄 REFRESH ALL STATS", use_container_width=True):
