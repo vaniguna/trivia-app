@@ -1,73 +1,75 @@
 import streamlit as st
 import requests
+import random
 
-st.set_page_config(page_title="Jeopardy! Mobile", page_icon="🏆")
+st.set_page_config(page_title="Jeopardy! Pro Trainer", page_icon="🎓")
 
-# Initialize Session State
-if 'clue' not in st.session_state:
-    st.session_state.clue = None
-    st.session_state.show_answer = False
+# The "Holy Grail" URL: A direct link to a massive JSON dump of real clues
+DATA_URL = "https://raw.githubusercontent.com/fivethirtyeight/data/master/jeopardy/jeopardy.csv"
+# Since CSVs are huge to load every time, we'll use a fast random-sampling API that 
+# mimics the J-Archive structure but is actually stable in 2026.
+API_URL = "https://cluebase.lukelav.in/clues/random?limit=20"
+
+if 'bank' not in st.session_state:
+    st.session_state.bank = []
+    st.session_state.idx = 0
+    st.session_state.show = False
     st.session_state.score = 0
 
-def get_new_clue():
-    st.session_state.show_answer = False
-    # API 1: jService (Real Jeopardy clues)
+def refresh_clues():
     try:
-        r = requests.get("https://jservice.io/api/random", timeout=5)
+        # Pulling 20 real clues at once to minimize loading screens
+        r = requests.get(API_URL, timeout=10)
         if r.status_code == 200:
-            data = r.json()[0]
-            st.session_state.clue = {
-                "question": data.get('question', 'No question text provided'),
-                "answer": data.get('answer', 'No answer provided'),
-                "category": data.get('category', {}).get('title', 'GENERAL'),
-                "value": data.get('value') or 400
-            }
-            return
+            st.session_state.bank = r.json()['data']
+            st.session_state.idx = 0
+            st.session_state.show = False
     except:
-        pass
+        st.error("Archive connection slow. Retrying...")
 
-    # API 2: OpenTDB (Backup high-quality trivia)
-    try:
-        r = requests.get("https://opentdb.com/api.php?amount=1&type=multiple", timeout=5)
-        if r.status_code == 200:
-            data = r.json()['results'][0]
-            st.session_state.clue = {
-                "question": data['question'],
-                "answer": data['correct_answer'],
-                "category": data['category'],
-                "value": 500
-            }
-            return
-    except:
-        st.error("All trivia servers are busy. Please try again in a moment.")
+# --- UI ---
+st.title("🏆 The J-Archive Pro-Trainer")
 
-st.title("🏆 Jeopardy! Mobile")
-
-if st.session_state.clue is None:
-    if st.button("GET RANDOM CLUE", type="primary"):
-        get_new_clue()
+if not st.session_state.bank:
+    if st.button("LOAD SHOW DATA", type="primary"):
+        refresh_clues()
         st.rerun()
 else:
-    c = st.session_state.clue
+    clue = st.session_state.bank[st.session_state.idx]
     
-    # Safe Display Logic
-    cat_text = str(c.get('category', 'GENERAL')).upper()
-    
-    st.info(f"CATEGORY: {cat_text}")
-    # Using markdown to handle any HTML symbols in the questions
-    st.markdown(f"### {c.get('question')}")
-    st.write(f"Value: ${c.get('value')}")
+    st.info(f"CATEGORY: {clue['category'].upper()}")
+    st.subheader(clue['clue'])
+    st.caption(f"Round: {clue['round']} | Value: ${clue['value'] or 'Final'}")
 
-    if not st.session_state.show_answer:
-        if st.button("REVEAL ANSWER", type="primary"):
-            st.session_state.show_answer = True
+    if not st.session_state.show:
+        if st.button("REVEAL RESPONSE", type="primary"):
+            st.session_state.show = True
             st.rerun()
     else:
-        ans_text = str(c.get('answer', 'N/A')).upper()
-        st.success(f"ANSWER: {ans_text}")
+        st.success(f"RESPONSE: {clue['response'].upper()}")
         
-        if st.button("NEXT CLUE ⏩"):
-            get_new_clue()
-            st.rerun()
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            if st.button("✅ YES"):
+                st.session_state.score += (clue['value'] or 1000)
+                st.session_state.idx += 1
+                st.session_state.show = False
+                st.rerun()
+        with c2:
+            if st.button("❌ NO"):
+                st.session_state.score -= (clue['value'] or 1000)
+                st.session_state.idx += 1
+                st.session_state.show = False
+                st.rerun()
+        with c3:
+            if st.button("⏩ SKIP"):
+                st.session_state.idx += 1
+                st.session_state.show = False
+                st.rerun()
 
-st.sidebar.metric("Bank", f"${st.session_state.score}")
+    # Automatic reload when bank is empty
+    if st.session_state.idx >= len(st.session_state.bank):
+        refresh_clues()
+        st.rerun()
+
+st.sidebar.metric("Career Earnings", f"${st.session_state.score}")
