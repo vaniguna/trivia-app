@@ -5,11 +5,10 @@ import glob
 import re
 import os
 
-st.set_page_config(page_title="Jeopardy! Pro Trainer", page_icon="🏆", layout="centered")
+st.set_page_config(page_title="Jeopardy! Pro Trainer", page_icon="🎓", layout="centered")
 
-# --- 1. BOARD CATEGORY ENGINE ---
-# Mapping board categories to study tags strictly by category name
-TAG_MAP = {
+# --- 1. STUDY TAG ENGINE ---
+UNIVERSAL_MAP = {
     "Vietnam War": r"vietnam|saigon|hanoi|viet cong",
     "Revolutionary War": r"revolutionary war|lexington|saratoga|yorktown|cornwallis",
     "Canadian History": r"canada|ottawa|toronto|quebec|hudson's bay|prime minister",
@@ -20,10 +19,10 @@ TAG_MAP = {
     "Science": r"molecule|element|physics|biology|chemistry"
 }
 
-def get_study_tag(row):
-    category_text = str(row.get('category', '')).lower()
-    for label, pattern in TAG_MAP.items():
-        if re.search(pattern, category_text):
+def identify_universal_cat(row):
+    text = f"{row.get('category', '')} {row.get('answer', '')}".lower()
+    for label, pattern in UNIVERSAL_MAP.items():
+        if re.search(pattern, text):
             return label
     return "Other"
 
@@ -63,7 +62,6 @@ def load_all_seasons():
     for f in files:
         try:
             temp_df = pd.read_csv(f, sep='\t', low_memory=False)
-            # Pull season number from filename (e.g., season41.tsv -> 41)
             s_match = re.search(r'\d+', f)
             temp_df['season'] = s_match.group() if s_match else "??"
             all_chunks.append(temp_df)
@@ -80,32 +78,76 @@ df = load_all_seasons()
 
 # --- 4. STATE MANAGEMENT ---
 if 'stats' not in st.session_state:
-    st.session_state.stats = {cat: {"correct": 0, "total": 0} for cat in TAG_MAP}
+    st.session_state.stats = {cat: {"correct": 0, "total": 0} for cat in UNIVERSAL_MAP}
     st.session_state.stats["Other"] = {"correct": 0, "total": 0}
 
 if 'idx' not in st.session_state:
     st.session_state.idx = 0
     st.session_state.show = False
     st.session_state.current_tag = "Other"
-    st.session_state.ready = False
+    st.session_state.initialized = False
 
 def get_next():
     if df is not None:
         st.session_state.idx = random.randint(0, len(df) - 1)
         st.session_state.show = False
         row = df.iloc[st.session_state.idx]
-        st.session_state.current_tag = get_study_tag(row)
-        st.session_state.ready = True
+        st.session_state.current_tag = identify_universal_cat(row)
+        st.session_state.initialized = True
 
 # --- 5. MAIN UI ---
 if df is None:
-    st.error("No .tsv files found! Ensure your season files are in the same folder.")
+    st.error("No .tsv files found in the folder!")
 else:
-    if not st.session_state.ready:
+    if not st.session_state.initialized:
         get_next()
 
     clue = df.iloc[st.session_state.idx]
-    u_tag = st.session_state.current_tag
+    u_cat = st.session_state.current_tag
 
-    # Display Category Header
-    header_html = f'<div class="category-box"><div class="category-text">{clue["category"]}</div></div>'
+    st.markdown(f'<div class="category-box"><div class="category-text">{clue["category"]}</div></div>', unsafe_allow_html=True)
+    st.markdown(f"### {clue['answer']}")
+    st.caption(f"Tag: **{u_cat}** | Season {clue['season']} | ${clue.get('clue_value', 400)}")
+
+    if not st.session_state.show:
+        if st.button("REVEAL RESPONSE", use_container_width=True):
+            st.session_state.show = True
+            st.rerun()
+    else:
+        st.success(f"RESPONSE: {str(clue['question']).upper()}")
+        
+        c1, c2 = st.columns(2)
+        with c1:
+            if st.button("✅ I GOT IT", use_container_width=True):
+                st.session_state.stats[u_cat]["correct"] += 1
+                st.session_state.stats[u_cat]["total"] += 1
+                get_next()
+                st.rerun()
+        with c2:
+            if st.button("❌ I MISSED IT", use_container_width=True):
+                st.session_state.stats[u_cat]["total"] += 1
+                get_next()
+                st.rerun()
+
+# --- 6. SIDEBAR (WEAKNESS TRACKER & REFRESH) ---
+st.sidebar.title("📊 Training Progress")
+
+# Total Score Metric
+total_correct = sum(d["correct"] for d in st.session_state.stats.values())
+total_seen = sum(d["total"] for d in st.session_state.stats.values())
+st.sidebar.metric("Total Correct", f"{total_correct} / {total_seen}")
+
+st.sidebar.divider()
+st.sidebar.subheader("Weakness Tracker")
+for cat, data in st.session_state.stats.items():
+    if data["total"] > 0:
+        acc = (data["correct"] / data["total"]) * 100
+        st.sidebar.write(f"**{cat}**")
+        st.sidebar.progress(acc / 100)
+        st.sidebar.caption(f"{acc:.0f}% accuracy ({data['total']} clues)")
+
+st.sidebar.divider()
+if st.sidebar.button("🔄 REFRESH ALL STATS", use_container_width=True):
+    st.session_state.stats = {cat: {"correct": 0, "total": 0} for cat in UNIVERSAL_MAP}
+    st.session_state.stats["Other"] = {"correct": 0, "total": 0}
+    st.rerun()
