@@ -7,12 +7,14 @@ st.set_page_config(page_title="Jeopardy! Pro Trainer", page_icon="🎓")
 # --- DATA LOADING (Fast & Offline) ---
 @st.cache_data
 def load_archive():
-    # Replace 'season41.tsv' with the exact name of the file you uploaded
+    # This pulls a 120,000+ clue dataset directly from a high-speed mirror
+    url = "https://raw.githubusercontent.com/jwolle1/jeopardy_clue_dataset/master/jeopardy_questions.csv"
     try:
-        df = pd.read_csv('season41.tsv', sep='\t')
-        # Filter for academic/high-value clues to keep it "real"
-        return df.dropna(subset=['clue', 'answer'])
-    except:
+        # We sample it so it's fast on your iPhone
+        df = pd.read_csv(url).sample(5000) 
+        return df
+    except Exception as e:
+        st.error(f"Failed to fetch show data: {e}")
         return None
 
 df = load_archive()
@@ -64,3 +66,4 @@ else:
                 st.rerun()
 
 st.sidebar.metric("Bank", f"${st.session_state.score}")
+
