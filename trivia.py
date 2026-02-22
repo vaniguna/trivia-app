@@ -41,9 +41,9 @@ st.markdown("""
         font-family: 'Arial Black', sans-serif;
         font-weight: bold;
         font-size: 28px;
-        letter-spacing: 2px;
         text-transform: uppercase;
     }
+    /* Slate Grey Reveal Button */
     div.stButton > button:first-child {
         background-color: #475569 !important;
         color: white !important;
@@ -63,7 +63,7 @@ def load_all_seasons():
     for f in files:
         try:
             temp_df = pd.read_csv(f, sep='\t', low_memory=False)
-            # Extract digits from filename to get the Season Number
+            # Extract Season Number from filename (e.g., season41.tsv -> 41)
             s_match = re.search(r'\d+', f)
             temp_df['season'] = s_match.group() if s_match else "??"
             all_chunks.append(temp_df)
@@ -87,59 +87,8 @@ if 'idx' not in st.session_state:
     st.session_state.idx = 0
     st.session_state.show = False
     st.session_state.current_tag = "Other"
+    st.session_state.ready = False
 
 def get_next():
     if df is not None:
-        st.session_state.idx = random.randint(0, len(df) - 1)
-        st.session_state.show = False
-        row = df.iloc[st.session_state.idx]
-        st.session_state.current_tag = identify_universal_cat(row)
-
-# --- MAIN UI ---
-if df is None:
-    st.error("No .tsv files found in the folder!")
-else:
-    # Initialize first clue
-    if st.session_state.idx == 0 and not st.session_state.show and 'init' not in st.session_state:
-        st.session_state.init = True
-        get_next()
-
-    clue = df.iloc[st.session_state.idx]
-    u_cat = st.session_state.current_tag
-
-    # Header and Answer
-    st.markdown(f'<div class="category-box"><div class="category-text">{clue["category"]}</div></div>', unsafe_allow_html=True)
-    st.markdown(f"### {clue['answer']}")
-    
-    # Metadata Row (Study Tag + Season #)
-    st.caption(f"Study Tag: **{u_cat}** | Season {clue['season']} | ${clue.get('clue_value', 400)}")
-
-    if not st.session_state.show:
-        if st.button("REVEAL RESPONSE", use_container_width=True):
-            st.session_state.show = True
-            st.rerun()
-    else:
-        st.success(f"RESPONSE: {str(clue['question']).upper()}")
-        
-        c1, c2 = st.columns(2)
-        with c1:
-            if st.button("✅ I GOT IT", use_container_width=True):
-                st.session_state.stats[u_cat]["correct"] += 1
-                st.session_state.stats[u_cat]["total"] += 1
-                get_next()
-                st.rerun()
-        with c2:
-            if st.button("❌ I MISSED IT", use_container_width=True):
-                st.session_state.stats[u_cat]["total"] += 1
-                get_next()
-                st.rerun()
-
-# --- SIDEBAR STATS ---
-st.sidebar.title("📊 Weakness Tracker")
-for cat, data in st.session_state.stats.items():
-    if data["total"] > 0:
-        acc = (data["correct"] / data["total"]) * 100
-        st.sidebar.write(f"**{cat}**")
-        st.sidebar.caption(f"{acc:.0f}% accuracy ({data['total']} seen)")
-        st.sidebar.progress(acc / 100)
-        st.sidebar.divider()
+        st.session_state.idx = random.
