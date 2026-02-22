@@ -1,73 +1,64 @@
 import streamlit as st
 import requests
-import html
 
-# --- CONFIG ---
 st.set_page_config(page_title="Jeopardy! Pro", page_icon="🏆")
 
-# --- INITIALIZE STATE ---
-if 'clues' not in st.session_state:
-    st.session_state.clues = []
-    st.session_state.current_idx = 0
-    st.session_state.score = 0
+# Initialize Session State
+if 'clue' not in st.session_state:
+    st.session_state.clue = None
     st.session_state.show_answer = False
+    st.session_state.score = 0
 
-def fetch_clues():
-    # Using a backup API just in case Cluebase is slow
-    url = "https://cluebase.com/api/clues/random?limit=10"
+def get_new_clue():
     try:
-        res = requests.get(url, timeout=5)
-        if res.status_code == 200:
-            st.session_state.clues = res.json().get('data', [])
-            st.session_state.current_idx = 0
-            st.session_state.show_answer = False
-        else:
-            st.error(f"API Error: {res.status_code}")
+        # Step 1: Attempt to get a real clue
+        response = requests.get("https://cluebase.com/api/clues/random", timeout=7)
+        if response.status_code == 200:
+            data = response.json()
+            if data.get('status') == 'success' and data.get('data'):
+                st.session_state.clue = data['data'][0]
+                st.session_state.show_answer = False
+                return
+        
+        # Step 2: Fallback if API is up but empty/errored
+        st.warning("API responded but found no clues. Using a backup training clue.")
+        st.session_state.clue = {
+            "category": "BACKUP TRAINING",
+            "clue": "This 'Great' lake is the only one located entirely within the U.S. border.",
+            "response": "Lake Michigan",
+            "value": 200
+        }
     except Exception as e:
-        st.error(f"Connection Failed: {e}")
+        # Step 3: Emergency Fallback for timeouts/crashes
+        st.error(f"Connection Error: {e}")
+        st.session_state.clue = {
+            "category": "OFFLINE MODE",
+            "clue": "To test the app, what is the chemical symbol for Tungsten?",
+            "response": "W",
+            "value": 1000
+        }
 
-# --- UI ---
-st.title("🏆 Jeopardy! Trainer")
+st.title("🏆 Jeopardy! Fast-Track")
 
-if not st.session_state.clues:
-    st.write("Click below to pull real clues from the archive.")
-    if st.button("Start Training", type="primary"):
-        fetch_clues()
+# UI Logic
+if st.session_state.clue is None:
+    if st.button("START TRAINING", type="primary"):
+        get_new_clue()
         st.rerun()
 else:
-    # Safety check for index
-    if st.session_state.current_idx >= len(st.session_state.clues):
-        st.success("Set complete!")
-        if st.button("Get More Clues"):
-            fetch_clues()
+    c = st.session_state.clue
+    st.info(f"CATEGORY: {c['category'].upper()}")
+    st.subheader(c['clue'])
+    st.caption(f"Value: ${c.get('value') or 'N/A'}")
+
+    if not st.session_state.show_answer:
+        if st.button("REVEAL ANSWER", type="primary"):
+            st.session_state.show_answer = True
             st.rerun()
     else:
-        clue = st.session_state.clues[st.session_state.current_idx]
-        
-        # Display Info
-        st.info(f"CATEGORY: {clue.get('category', 'UNKNOWN').upper()}")
-        st.subheader(clue.get('clue', 'No clue text found'))
-        st.write(f"Value: ${clue.get('value', 200)}")
+        st.success(f"RESPONSE: {c['response'].upper()}")
+        if st.button("NEXT CLUE ⏩"):
+            get_new_clue()
+            st.rerun()
 
-        if not st.session_state.show_answer:
-            if st.button("Reveal Answer", type="primary"):
-                st.session_state.show_answer = True
-                st.rerun()
-        else:
-            st.success(f"ANSWER: {clue.get('response', 'No response found')}")
-            
-            col1, col2 = st.columns(2)
-            with col1:
-                if st.button("✅ Correct"):
-                    st.session_state.score += (clue.get('value') or 200)
-                    st.session_state.current_idx += 1
-                    st.session_state.show_answer = False
-                    st.rerun()
-            with col2:
-                if st.button("❌ Incorrect"):
-                    st.session_state.score -= (clue.get('value') or 200)
-                    st.session_state.current_idx += 1
-                    st.session_state.show_answer = False
-                    st.rerun()
-
-st.sidebar.metric("Total Score", f"${st.session_state.score}")
+st.sidebar.metric("Bank", f"${st.session_state.score}")
