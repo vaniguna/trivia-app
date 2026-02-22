@@ -5,11 +5,11 @@ import glob
 import re
 import os
 
-st.set_page_config(page_title="Jeopardy! Pro Trainer", page_icon="🎓", layout="centered")
+st.set_page_config(page_title="Jeopardy! Pro", page_icon="🏆", layout="centered")
 
 # --- 1. BOARD CATEGORY ENGINE ---
-# Mapping board categories to study tags
-UNIVERSAL_MAP = {
+# Mapping board categories to study tags strictly by category name
+TAG_MAP = {
     "Vietnam War": r"vietnam|saigon|hanoi|viet cong",
     "Revolutionary War": r"revolutionary war|lexington|saratoga|yorktown|cornwallis",
     "Canadian History": r"canada|ottawa|toronto|quebec|hudson's bay|prime minister",
@@ -20,105 +20,77 @@ UNIVERSAL_MAP = {
     "Science": r"molecule|element|physics|biology|chemistry"
 }
 
-def identify_universal_tag(row):
-    # Only checks the actual board category as requested
-    category_text = str(row.get('category', '')).lower()
-    for label, pattern in UNIVERSAL_MAP.items():
-        if re.search(pattern, category_text):
+def get_study_tag(row):
+    # Strictly works off the actual board category
+    cat_text = str(row.get('category', '')).lower()
+    for label, pattern in TAG_MAP.items():
+        if re.search(pattern, cat_text):
             return label
     return "Other"
 
-# --- 2. CUSTOM CSS ---
-st.markdown("""
-    <style>
-    .category-box {
-        background-color: #060ce9;
-        color: white;
-        padding: 20px;
-        border-radius: 10px;
-        text-align: center;
-        margin-bottom: 25px;
-    }
-    .category-text {
-        font-family: 'Arial Black', sans-serif;
-        font-weight: bold;
-        font-size: 28px;
-        text-transform: uppercase;
-    }
-    div.stButton > button:first-child {
-        background-color: #475569 !important;
-        color: white !important;
-        border: none !important;
-    }
-    </style>
-""", unsafe_allow_html=True)
-
-# --- 3. DATA LOADING (SEASON CAPTURE) ---
+# --- 2. STABLE DATA LOADER ---
 @st.cache_data
-def load_all_seasons():
+def load_local_data():
     files = glob.glob("*.tsv")
     if not files:
         return None
     
-    all_chunks = []
+    chunks = []
     for f in files:
         try:
-            temp_df = pd.read_csv(f, sep='\t', low_memory=False)
-            s_match = re.search(r'\d+', f)
-            temp_df['season'] = s_match.group() if s_match else "??"
-            all_chunks.append(temp_df)
+            temp = pd.read_csv(f, sep='\t', low_memory=False)
+            # Pull season number from filename (e.g., season40.tsv)
+            match = re.search(r'\d+', f)
+            temp['season'] = match.group() if match else "??"
+            chunks.append(temp)
         except:
             continue
-            
-    if not all_chunks:
-        return None
     
-    df = pd.concat(all_chunks, ignore_index=True)
-    return df.dropna(subset=['answer', 'question']).sample(frac=1).reset_index(drop=True)
+    if not chunks:
+        return None
+    full_df = pd.concat(chunks, ignore_index=True)
+    return full_df.dropna(subset=['answer', 'question']).sample(frac=1).reset_index(drop=True)
 
-df = load_all_seasons()
+df = load_local_data()
 
-# --- 4. STATE MANAGEMENT ---
+# --- 3. STATE INITIALIZATION ---
 if 'stats' not in st.session_state:
-    st.session_state.stats = {cat: {"correct": 0, "total": 0} for cat in UNIVERSAL_MAP}
-    st.session_state.stats["Other"] = {"correct": 0, "total": 0}
+    st.session_state.stats = {cat: {"ok": 0, "total": 0} for cat in TAG_MAP}
+    st.session_state.stats["Other"] = {"ok": 0, "total": 0}
 
 if 'idx' not in st.session_state:
     st.session_state.idx = 0
-    st.session_state.show = False
+    st.session_state.reveal = False
     st.session_state.current_tag = "Other"
-    st.session_state.ready = False
 
-def get_next():
+def next_clue():
     if df is not None:
-        st.session_state.idx = random.randint(0, len(df) - 1)
-        st.session_state.show = False
+        st.session_state.idx = random.randint(0, len(df)-1)
+        st.session_state.reveal = False
         row = df.iloc[st.session_state.idx]
-        st.session_state.current_tag = identify_universal_tag(row)
-        st.session_state.ready = True
+        st.session_state.current_tag = get_study_tag(row)
 
-# --- 5. MAIN UI ---
+# --- 4. UI AND CLUE DISPLAY ---
 if df is None:
-    st.error("No .tsv files found in the directory!")
+    st.error("No clue files found! Please ensure your .tsv files are in the same folder.")
 else:
-    if not st.session_state.ready:
-        get_next()
+    # Set initial clue
+    if st.session_state.idx == 0 and not st.session_state.reveal and 'init' not in st.session_state:
+        st.session_state.init = True
+        next_clue()
 
     clue = df.iloc[st.session_state.idx]
-    u_tag = st.session_state.current_tag
+    tag = st.session_state.current_tag
 
-    # Clue Header
-    st.markdown(f'<div class="category-box"><div class="category-text">{clue["category"]}</div></div>', unsafe_allow_html=True)
-    st.markdown(f"### {clue['answer']}")
-    st.caption(f"Study Tag: **{u_tag}** | Season {clue['season']} | ${clue.get('clue_value', 400)}")
+    # Styling the header
+    st.markdown(f"""
+        <div style="background-color: #060ce9; color: white; padding: 20px; border-radius: 10px; text-align: center; margin-bottom: 20px;">
+            <h1 style="margin:0; font-family: sans-serif; text-transform: uppercase;">{clue['category']}</h1>
+        </div>
+    """, unsafe_allow_html=True)
 
-    if not st.session_state.show:
-        if st.button("REVEAL RESPONSE", use_container_width=True):
-            st.session_state.show = True
-            st.rerun()
-    else:
-        st.success(f"RESPONSE: {str(clue['question']).upper()}")
-        
-        c1, c2 = st.columns(2)
-        with c1:
-            if st.button("✅ I GOT IT", use_container_width=True):
+    st.subheader(clue['answer'])
+    st.caption(f"Study Tag: **{tag}** | Season {clue['season']} | ${clue.get('clue_value', 400)}")
+
+    if not st.session_state.reveal:
+        if st.button("REVEAL RESPONSE", use_container_width=True, type="primary"):
