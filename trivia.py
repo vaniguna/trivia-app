@@ -51,7 +51,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- 3. DATA LOADING ---
+# --- 3. DATA LOADING (SEASON CAPTURE) ---
 @st.cache_data
 def load_all_seasons():
     files = glob.glob("*.tsv")
@@ -107,7 +107,6 @@ else:
 
     st.markdown(f'<div class="category-box"><div class="category-text">{clue["category"]}</div></div>', unsafe_allow_html=True)
     st.markdown(f"### {clue['answer']}")
-    
     st.caption(f"Tag: **{u_cat}** | Season {clue['season']} | ${clue.get('clue_value', 400)}")
 
     if not st.session_state.show:
@@ -128,3 +127,27 @@ else:
             if st.button("❌ I MISSED IT", use_container_width=True):
                 st.session_state.stats[u_cat]["total"] += 1
                 get_next()
+                st.rerun()
+
+# --- 6. SIDEBAR (WEAKNESS TRACKER & REFRESH) ---
+st.sidebar.title("📊 Training Progress")
+
+# Total Score Metric
+total_correct = sum(d["correct"] for d in st.session_state.stats.values())
+total_seen = sum(d["total"] for d in st.session_state.stats.values())
+st.sidebar.metric("Total Correct", f"{total_correct} / {total_seen}")
+
+st.sidebar.divider()
+st.sidebar.subheader("Weakness Tracker")
+for cat, data in st.session_state.stats.items():
+    if data["total"] > 0:
+        acc = (data["correct"] / data["total"]) * 100
+        st.sidebar.write(f"**{cat}**")
+        st.sidebar.progress(acc / 100)
+        st.sidebar.caption(f"{acc:.0f}% accuracy ({data['total']} clues)")
+
+st.sidebar.divider()
+if st.sidebar.button("🔄 REFRESH ALL STATS", use_container_width=True):
+    st.session_state.stats = {cat: {"correct": 0, "total": 0} for cat in UNIVERSAL_MAP}
+    st.session_state.stats["Other"] = {"correct": 0, "total": 0}
+    st.rerun()
