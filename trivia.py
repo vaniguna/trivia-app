@@ -19,7 +19,7 @@ UNIVERSAL_MAP = {
 }
 
 def identify_universal_cat(row):
-    text = f"{row['category']} {row['answer']}".lower()
+    text = f"{row.get('category', '')} {row.get('answer', '')}".lower()
     for label, pattern in UNIVERSAL_MAP.items():
         if re.search(pattern, text):
             return label
@@ -55,38 +55,22 @@ st.markdown("""
 @st.cache_data(show_spinner="Shuffling Archive...")
 def load_all_data():
     files = glob.glob("*.tsv")
-    if not files: return None
+    if not files:
+        return None
     all_data = []
     for f in files:
         try:
             temp_df = pd.read_csv(f, sep='\t', low_memory=False)
-            # Find digits in filename for season number
             s_match = re.search(r'\d+', f)
             temp_df['season_num'] = s_match.group() if s_match else "Unknown"
             all_data.append(temp_df)
-        except: continue
-    if not all_data: return None
+        except Exception:
+            continue
+    if not all_data:
+        return None
     df = pd.concat(all_data, ignore_index=True)
     return df.dropna(subset=['answer', 'question']).sample(frac=1).reset_index(drop=True)
 
 df = load_all_data()
 
-# --- STATE MANAGEMENT ---
-if 'stats' not in st.session_state:
-    st.session_state.stats = {cat: {"correct": 0, "total": 0} for cat in UNIVERSAL_MAP}
-    st.session_state.stats["Other"] = {"correct": 0, "total": 0}
-
-if 'idx' not in st.session_state:
-    st.session_state.idx = 0
-    st.session_state.show = False
-    st.session_state.current_tag = "Other"
-
-def get_next_clue():
-    if df is not None:
-        st.session_state.idx = random.randint(0, len(df) - 1)
-        st.session_state.show = False
-        row = df.iloc[st.session_state.idx]
-        st.session_state.current_tag = identify_universal_cat(row)
-
-# --- MAIN APP ---
-if
+# --- STATE MANAGEMENT
