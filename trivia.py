@@ -63,7 +63,7 @@ def load_all_seasons():
     for f in files:
         try:
             temp_df = pd.read_csv(f, sep='\t', low_memory=False)
-            # Find the digits in the filename (e.g., season41.tsv -> 41)
+            # Pull season number from filename (e.g., season41.tsv -> 41)
             s_match = re.search(r'\d+', f)
             temp_df['season'] = s_match.group() if s_match else "??"
             all_chunks.append(temp_df)
@@ -99,7 +99,7 @@ def get_next():
 
 # --- 5. MAIN UI ---
 if df is None:
-    st.error("No .tsv files found in the directory! Ensure your season files are present.")
+    st.error("No .tsv files found! Ensure your season files are in the same folder.")
 else:
     if not st.session_state.ready:
         get_next()
@@ -107,5 +107,5 @@ else:
     clue = df.iloc[st.session_state.idx]
     u_tag = st.session_state.current_tag
 
-    # Header and Answer
-    st.markdown(f'<div class="category-box"><div class="category-
+    # Display Category Header
+    header_html = f'<div class="category-box"><div class="category-text">{clue["category"]}</div></div>'
