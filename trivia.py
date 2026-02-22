@@ -224,7 +224,35 @@ def identify_universal_cat(row):
 
     return "Other"
 
-# --- 2. CUSTOM CSS ---
+# --- 2. FUZZY ANSWER MATCHING ---
+def normalize(text):
+    """Strip articles, punctuation, extra whitespace, lowercase."""
+    text = str(text).lower().strip()
+    text = re.sub(r'\b(a|an|the)\b', '', text)          # remove articles
+    text = re.sub(r'[^a-z0-9\s]', '', text)              # remove punctuation
+    text = re.sub(r'\s+', ' ', text).strip()
+    return text
+
+def fuzzy_match(user_ans, correct_ans, threshold=75):
+    """
+    Returns (is_correct: bool, score: int).
+    Uses character-level similarity on normalized strings.
+    Falls back gracefully if difflib is unavailable.
+    """
+    import difflib
+    u = normalize(user_ans)
+    c = normalize(correct_ans)
+    if not u:
+        return False, 0
+    # SequenceMatcher ratio is 0-1; multiply by 100 for a percentage score
+    ratio = difflib.SequenceMatcher(None, u, c).ratio() * 100
+    # Also check if the user answer is fully contained in correct (or vice versa)
+    # handles cases like "napoleon" matching "napoleon bonaparte"
+    contained = (u in c) or (c in u)
+    score = int(max(ratio, 100 if contained else 0))
+    return score >= threshold, min(score, 100)
+
+# --- 3. CUSTOM CSS ---
 st.markdown("""
     <style>
     .category-box {
@@ -249,7 +277,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- 3. DATA LOADING (SEASON CAPTURE) ---
+# --- 4. DATA LOADING (SEASON CAPTURE) ---
 @st.cache_data
 def load_all_seasons():
     files = glob.glob("*.tsv")
@@ -274,7 +302,7 @@ def load_all_seasons():
 
 df = load_all_seasons()
 
-# --- 4. STATE MANAGEMENT ---
+# --- 5. STATE MANAGEMENT ---
 if 'stats' not in st.session_state:
     st.session_state.stats = {cat: {"correct": 0, "total": 0} for cat in ALL_TAGS}
 elif set(ALL_TAGS) - set(st.session_state.stats.keys()):
@@ -285,21 +313,49 @@ elif set(ALL_TAGS) - set(st.session_state.stats.keys()):
 if 'winnings' not in st.session_state:
     st.session_state.winnings = 0
 
+if 'settings' not in st.session_state:
+    st.session_state.settings = {
+        "close_enough": False,
+        "close_enough_threshold": 75,
+        "difficulty": "All",          # "All", "Easy ($200-$600)", "Medium ($800-$1200)", "Hard ($1600+)"
+    }
+
 if 'idx' not in st.session_state:
     st.session_state.idx = 0
     st.session_state.show = False
     st.session_state.current_tag = "Other"
     st.session_state.initialized = False
+    st.session_state.user_answer = ""
+    st.session_state.match_result = None   # None | (is_correct, score)
+
+DIFFICULTY_RANGES = {
+    "All":              (0, 999999),
+    "Easy ($200–$600)": (0, 600),
+    "Medium ($800–$1200)": (800, 1200),
+    "Hard ($1600+)":    (1600, 999999),
+}
+
+def get_filtered_pool():
+    if df is None:
+        return None
+    lo, hi = DIFFICULTY_RANGES[st.session_state.settings["difficulty"]]
+    pool = df[df['clue_value'].apply(
+        lambda v: lo <= int(v or 0) <= hi
+    )]
+    return pool if len(pool) > 0 else df   # fallback to full set if filter yields nothing
 
 def get_next():
-    if df is not None:
-        st.session_state.idx = random.randint(0, len(df) - 1)
+    pool = get_filtered_pool()
+    if pool is not None:
+        st.session_state.idx = pool.sample(1).index[0]
         st.session_state.show = False
+        st.session_state.user_answer = ""
+        st.session_state.match_result = None
         row = df.iloc[st.session_state.idx]
         st.session_state.current_tag = identify_universal_cat(row)
         st.session_state.initialized = True
 
-# --- 5. MAIN UI ---
+# --- 6. MAIN UI ---
 if df is None:
     st.error("No .tsv files found in the folder!")
 else:
@@ -309,6 +365,8 @@ else:
     clue = df.iloc[st.session_state.idx]
     u_cat = st.session_state.current_tag
     clue_value = int(clue.get('clue_value') or 400)
+    close_enough_on = st.session_state.settings["close_enough"]
+    correct_response = str(clue['question'])
 
     st.markdown(f'<div class="category-box"><div class="category-text">{clue["category"]}</div></div>', unsafe_allow_html=True)
     st.markdown(f"### {clue['answer']}")
@@ -328,29 +386,95 @@ else:
         u_cat = selected_tag
         st.rerun()
 
-    if not st.session_state.show:
-        if st.button("REVEAL RESPONSE", use_container_width=True):
-            st.session_state.show = True
-            st.rerun()
+    # ── CLOSE ENOUGH MODE ──────────────────────────────────────────────────
+    if close_enough_on:
+        if not st.session_state.show:
+            user_ans = st.text_input(
+                "Your answer:",
+                value=st.session_state.get("user_answer", ""),
+                placeholder='Type your response...',
+                key=f"ans_input_{st.session_state.idx}"
+            )
+            if st.button("CHECK ANSWER", use_container_width=True, type="primary"):
+                is_correct, score = fuzzy_match(
+                    user_ans, correct_response,
+                    threshold=st.session_state.settings["close_enough_threshold"]
+                )
+                st.session_state.user_answer = user_ans
+                st.session_state.match_result = (is_correct, score)
+                st.session_state.show = True
+                st.rerun()
+        else:
+            result = st.session_state.match_result
+            is_correct, score = result if result else (None, 0)
+
+            st.success(f"RESPONSE: {correct_response.upper()}")
+
+            if is_correct is True:
+                st.success(f"✅ Match! Similarity: {score}%  |  You wrote: *\"{st.session_state.user_answer}\"*")
+            elif is_correct is False:
+                st.error(f"❌ No match. Similarity: {score}%  |  You wrote: *\"{st.session_state.user_answer}\"*")
+
+            # Allow override in case fuzzy was wrong
+            st.caption("Override if the auto-grade got it wrong:")
+            c1, c2, c3 = st.columns(3)
+            with c1:
+                if st.button("✅ Count Correct", use_container_width=True):
+                    st.session_state.stats[u_cat]["correct"] += 1
+                    st.session_state.stats[u_cat]["total"] += 1
+                    st.session_state.winnings += clue_value
+                    get_next()
+                    st.rerun()
+            with c2:
+                if st.button("❌ Count Wrong", use_container_width=True):
+                    st.session_state.stats[u_cat]["total"] += 1
+                    st.session_state.winnings -= clue_value
+                    get_next()
+                    st.rerun()
+            with c3:
+                if st.button("⏭️ Skip", use_container_width=True):
+                    get_next()
+                    st.rerun()
+
+            # Auto-advance on clear match/miss (still shows override above)
+            if is_correct is True:
+                if st.button("➡️ NEXT (Counted Correct)", use_container_width=True, type="primary"):
+                    st.session_state.stats[u_cat]["correct"] += 1
+                    st.session_state.stats[u_cat]["total"] += 1
+                    st.session_state.winnings += clue_value
+                    get_next()
+                    st.rerun()
+            else:
+                if st.button("➡️ NEXT (Counted Wrong)", use_container_width=True, type="primary"):
+                    st.session_state.stats[u_cat]["total"] += 1
+                    st.session_state.winnings -= clue_value
+                    get_next()
+                    st.rerun()
+
+    # ── CLASSIC (SELF-REPORT) MODE ─────────────────────────────────────────
     else:
-        st.success(f"RESPONSE: {str(clue['question']).upper()}")
-
-        c1, c2 = st.columns(2)
-        with c1:
-            if st.button("✅ I GOT IT", use_container_width=True):
-                st.session_state.stats[u_cat]["correct"] += 1
-                st.session_state.stats[u_cat]["total"] += 1
-                st.session_state.winnings += clue_value
-                get_next()
+        if not st.session_state.show:
+            if st.button("REVEAL RESPONSE", use_container_width=True, type="primary"):
+                st.session_state.show = True
                 st.rerun()
-        with c2:
-            if st.button("❌ I MISSED IT", use_container_width=True):
-                st.session_state.stats[u_cat]["total"] += 1
-                st.session_state.winnings -= clue_value
-                get_next()
-                st.rerun()
+        else:
+            st.success(f"RESPONSE: {correct_response.upper()}")
+            c1, c2 = st.columns(2)
+            with c1:
+                if st.button("✅ I GOT IT", use_container_width=True):
+                    st.session_state.stats[u_cat]["correct"] += 1
+                    st.session_state.stats[u_cat]["total"] += 1
+                    st.session_state.winnings += clue_value
+                    get_next()
+                    st.rerun()
+            with c2:
+                if st.button("❌ I MISSED IT", use_container_width=True):
+                    st.session_state.stats[u_cat]["total"] += 1
+                    st.session_state.winnings -= clue_value
+                    get_next()
+                    st.rerun()
 
-# --- 6. SIDEBAR (WEAKNESS TRACKER & REFRESH) ---
+# --- 7. SIDEBAR ---
 st.sidebar.title("📊 Training Progress")
 
 total_correct = sum(d["correct"] for d in st.session_state.stats.values())
@@ -361,6 +485,49 @@ col_a.metric("Total Correct", f"{total_correct} / {total_seen}")
 winnings = st.session_state.get('winnings', 0)
 col_b.metric("Winnings", f"{'$' if winnings >= 0 else '-$'}{abs(winnings):,}")
 
+# ── SETTINGS ──────────────────────────────────────────────────────────────
+st.sidebar.divider()
+st.sidebar.subheader("⚙️ Settings")
+
+# Difficulty filter
+diff_choice = st.sidebar.radio(
+    "Difficulty Filter",
+    options=list(DIFFICULTY_RANGES.keys()),
+    index=list(DIFFICULTY_RANGES.keys()).index(st.session_state.settings["difficulty"]),
+    horizontal=False,
+)
+if diff_choice != st.session_state.settings["difficulty"]:
+    st.session_state.settings["difficulty"] = diff_choice
+    get_next()   # immediately fetch a clue from the new pool
+    st.rerun()
+
+st.sidebar.divider()
+
+# Close enough mode toggle
+close_toggle = st.sidebar.toggle(
+    "🧠 Close Enough Mode",
+    value=st.session_state.settings["close_enough"],
+    help="Type your answer and let the app grade it automatically using fuzzy matching."
+)
+if close_toggle != st.session_state.settings["close_enough"]:
+    st.session_state.settings["close_enough"] = close_toggle
+    st.session_state.show = False
+    st.session_state.user_answer = ""
+    st.session_state.match_result = None
+    st.rerun()
+
+if st.session_state.settings["close_enough"]:
+    threshold = st.sidebar.slider(
+        "Match Sensitivity",
+        min_value=50, max_value=95,
+        value=st.session_state.settings["close_enough_threshold"],
+        step=5,
+        help="Higher = stricter grading. 75 is recommended. Lower if you want partial credit for close-ish answers."
+    )
+    if threshold != st.session_state.settings["close_enough_threshold"]:
+        st.session_state.settings["close_enough_threshold"] = threshold
+
+# ── WEAKNESS TRACKER ──────────────────────────────────────────────────────
 st.sidebar.divider()
 st.sidebar.subheader("Weakness Tracker")
 for cat, data in st.session_state.stats.items():
