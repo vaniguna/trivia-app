@@ -4,6 +4,7 @@ import random
 import glob
 import re
 import os
+from drill_mode import render_drill_mode
 
 st.set_page_config(page_title="Jeopardy! Pro Trainer", page_icon="🎓", layout="centered")
 
@@ -397,57 +398,59 @@ def record_and_advance(correct: bool, clue_value: int, u_cat: str):
         get_next()
 
 # --- 6. MAIN UI ---
-if df is None:
-    st.error("No .tsv files found in the folder!")
+tab_game, tab_drill = st.tabs(["🎯 Jeopardy Trainer", "🧠 Drill Mode"])
 
-elif not st.session_state.get('session_active', True):
-    # ── SESSION COMPLETE SCREEN ────────────────────────────────────────────
-    total_q   = st.session_state.question_num
-    total_cor = sum(d["correct"] for d in st.session_state.stats.values())
-    pct       = int(total_cor / total_q * 100) if total_q else 0
-    win       = st.session_state.winnings
+with tab_game:
+    if df is None:
+        st.error("No .tsv files found in the folder!")
 
-    st.markdown("## 🏆 Session Complete!")
-    st.markdown(f"**Questions answered:** {total_q}")
-    st.markdown(f"**Correct:** {total_cor} ({pct}%)")
-    st.markdown(f"**Winnings:** {'$' if win >= 0 else '-$'}{abs(win):,}")
+    elif not st.session_state.get('session_active', True):
+        # ── SESSION COMPLETE SCREEN ────────────────────────────────────────
+        total_q   = st.session_state.question_num
+        total_cor = sum(d["correct"] for d in st.session_state.stats.values())
+        pct       = int(total_cor / total_q * 100) if total_q else 0
+        win       = st.session_state.winnings
 
-    # Per-tag breakdown for this session
-    st.markdown("---")
-    st.markdown("### Category Breakdown")
-    for cat, data in st.session_state.stats.items():
-        if data["total"] > 0:
-            acc = data["correct"] / data["total"] * 100
-            st.markdown(f"**{cat}** — {acc:.0f}% ({data['correct']}/{data['total']})")
+        st.markdown("## 🏆 Session Complete!")
+        st.markdown(f"**Questions answered:** {total_q}")
+        st.markdown(f"**Correct:** {total_cor} ({pct}%)")
+        st.markdown(f"**Winnings:** {'$' if win >= 0 else '-$'}{abs(win):,}")
 
-    st.markdown("---")
-    if st.button("▶️ Start New Session", type="primary", use_container_width=True):
-        st.session_state.session_active = True
-        st.session_state.question_num = 0
-        get_next()
-        st.rerun()
-    if st.button("🔄 Reset All Stats & Start Over", use_container_width=True):
-        st.session_state.stats = {cat: {"correct": 0, "total": 0} for cat in ALL_TAGS}
-        st.session_state.winnings = 0
-        st.session_state.session_active = True
-        st.session_state.question_num = 0
-        get_next()
-        st.rerun()
+        st.markdown("---")
+        st.markdown("### Category Breakdown")
+        for cat, data in st.session_state.stats.items():
+            if data["total"] > 0:
+                acc = data["correct"] / data["total"] * 100
+                st.markdown(f"**{cat}** — {acc:.0f}% ({data['correct']}/{data['total']})")
 
-else:
-    if not st.session_state.initialized:
-        get_next()
+        st.markdown("---")
+        if st.button("▶️ Start New Session", type="primary", use_container_width=True):
+            st.session_state.session_active = True
+            st.session_state.question_num = 0
+            get_next()
+            st.rerun()
+        if st.button("🔄 Reset All Stats & Start Over", use_container_width=True):
+            st.session_state.stats = {cat: {"correct": 0, "total": 0} for cat in ALL_TAGS}
+            st.session_state.winnings = 0
+            st.session_state.session_active = True
+            st.session_state.question_num = 0
+            get_next()
+            st.rerun()
 
-    clue          = df.iloc[st.session_state.idx]
-    u_cat         = st.session_state.current_tag
-    _raw_value    = int(clue.get('clue_value') or 0)
-    clue_value    = _raw_value if _raw_value > 0 else 0
-    clue_value_display = "Final Jeopardy" if _raw_value == 0 else f"${_raw_value}"
-    close_enough_on = st.session_state.settings["close_enough"]
-    correct_response = str(clue['question'])
-    timer_on      = close_enough_on and st.session_state.settings["timer_enabled"]
-    timer_limit   = st.session_state.settings["timer_seconds"]
-    session_limit = st.session_state.settings["session_length"]
+    else:
+        if not st.session_state.initialized:
+            get_next()
+
+        clue          = df.iloc[st.session_state.idx]
+        u_cat         = st.session_state.current_tag
+        _raw_value    = int(clue.get('clue_value') or 0)
+        clue_value    = _raw_value if _raw_value > 0 else 0
+        clue_value_display = "Final Jeopardy" if _raw_value == 0 else f"${_raw_value}"
+        close_enough_on = st.session_state.settings["close_enough"]
+        correct_response = str(clue['question'])
+        timer_on      = close_enough_on and st.session_state.settings["timer_enabled"]
+        timer_limit   = st.session_state.settings["timer_seconds"]
+        session_limit = st.session_state.settings["session_length"]
 
     # ── QUESTION COUNTER & TIMER BAR ──────────────────────────────────────
     header_left, header_right = st.columns([2, 1])
@@ -691,3 +694,6 @@ if st.sidebar.button("🔄 REFRESH ALL STATS", use_container_width=True):
     st.session_state.stats = {cat: {"correct": 0, "total": 0} for cat in ALL_TAGS}
     st.session_state.winnings = 0
     st.rerun()
+
+with tab_drill:
+    render_drill_mode()
