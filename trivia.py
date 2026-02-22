@@ -25,7 +25,7 @@ st.markdown("""
         text-shadow: 2px 2px #000;
     }
     </style>
-""", unsafe_allow_index=True)
+""", unsafe_allow_html=True)
 
 # --- DATA LOADING ---
 @st.cache_data(show_spinner="Shuffling the Archive...")
@@ -49,36 +49,39 @@ def load_all_seasons():
         return None
         
     df = pd.concat(all_data, ignore_index=True)
-    return df.dropna(subset=['answer', 'question'])
+    df = df.dropna(subset=['answer', 'question'])
+    # Shuffle the entire dataframe once on load to ensure cross-season variety
+    return df.sample(frac=1).reset_index(drop=True)
 
 df = load_all_seasons()
 
-# --- FORCE RANDOMIZATION ---
+# --- STATE MANAGEMENT ---
 if 'idx' not in st.session_state:
-    if df is not None:
-        st.session_state.idx = random.randint(0, len(df) - 1)
-    else:
-        st.session_state.idx = 0
+    st.session_state.idx = 0
     st.session_state.show = False
     st.session_state.score = 0
 
-def get_next_shuffle():
-    # True random pick from the combined dataframe
+def get_next():
+    # Pick a random index from the already shuffled dataframe
     st.session_state.idx = random.randint(0, len(df) - 1)
     st.session_state.show = False
 
 # --- UI ---
 if df is None:
-    st.error("No .tsv files detected! Ensure season30.tsv through season41.tsv are in your GitHub folder.")
+    st.error("No .tsv files detected! Ensure your season files are in your GitHub folder.")
 else:
+    # Handle the very first load
+    if st.session_state.idx == 0 and not st.session_state.show:
+        get_next()
+
     clue = df.iloc[st.session_state.idx]
     
-    # 1. THE CATEGORY HEADER (Jeopardy Style)
+    # 1. THE CATEGORY HEADER (Fixed HTML tag)
     st.markdown(f"""
         <div class="category-box">
             <div class="category-text">{str(clue['category']).upper()}</div>
         </div>
-    """, unsafe_allow_index=True)
+    """, unsafe_allow_html=True)
 
     # 2. THE CLUE
     st.markdown(f"### {clue['answer']}")
@@ -97,15 +100,15 @@ else:
             if st.button("✅ I GOT IT", use_container_width=True):
                 val = str(clue.get('clue_value', '400')).replace('$', '').replace(',', '')
                 st.session_state.score += int(val) if val.isdigit() else 400
-                get_next_shuffle()
+                get_next()
                 st.rerun()
         with c2:
             if st.button("❌ I MISSED IT", use_container_width=True):
-                get_next_shuffle()
+                get_next()
                 st.rerun()
 
 st.sidebar.metric("Career Earnings", f"${st.session_state.score:,}")
 st.sidebar.write(f"Total Bank: **{len(df):,} clues**")
-if st.sidebar.button("Force Shuffle New Season"):
-    get_next_shuffle()
+if st.sidebar.button("Force Global Reshuffle"):
+    st.cache_data.clear()
     st.rerun()
