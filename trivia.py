@@ -7,7 +7,7 @@ import os
 
 st.set_page_config(page_title="Jeopardy! Pro Trainer", page_icon="🎓", layout="centered")
 
-# --- CUSTOM CSS (Flat Blue Header, Slate Reveal Button) ---
+# --- CUSTOM CSS ---
 st.markdown("""
     <style>
     .category-box {
@@ -21,11 +21,9 @@ st.markdown("""
     .category-text {
         font-family: 'Arial Black', sans-serif;
         font-weight: bold;
-        font-size: 26px;
-        letter-spacing: 1px;
+        font-size: 24px;
         text-transform: uppercase;
     }
-    /* Neutral Slate Reveal Button */
     div.stButton > button:first-child {
         background-color: #475569 !important;
         color: white !important;
@@ -34,19 +32,19 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- UNIVERSAL CATEGORY ENGINE ---
+# --- CATEGORY ENGINE ---
 UNIVERSAL_MAP = {
-    "Vietnam War": r"vietnam|saigon|hanoi|viet cong",
-    "Revolutionary War": r"revolutionary war|lexington|saratoga|yorktown|cornwallis",
-    "Canadian History": r"canada|ottawa|toronto|quebec|hudson's bay|prime minister",
-    "European Mountains": r"alps|pyrenees|carpathians|caucasus|mont blanc|matterhorn",
-    "Asian Rivers": r"mekong|yangtze|ganges|indus|yellow river|brahmaputra",
-    "U.S. Presidents": r"president|white house|potus",
-    "Shakespeare": r"shakespeare|hamlet|macbeth|othello|bard",
-    "Science": r"molecule|element|physics|biology|chemistry"
+    "Vietnam War": r"vietnam|saigon|hanoi",
+    "Revolutionary War": r"revolutionary war|saratoga|yorktown",
+    "Canadian History": r"canada|ottawa|toronto|quebec",
+    "European Mountains": r"alps|pyrenees|mont blanc",
+    "Asian Rivers": r"mekong|yangtze|ganges",
+    "U.S. Presidents": r"president|white house",
+    "Shakespeare": r"shakespeare|hamlet|macbeth",
+    "Science": r"molecule|physics|biology|chemistry"
 }
 
-def get_study_tag(row):
+def get_tag(row):
     text = f"{row.get('category', '')} {row.get('answer', '')}".lower()
     for label, pattern in UNIVERSAL_MAP.items():
         if re.search(pattern, text):
@@ -54,24 +52,48 @@ def get_study_tag(row):
     return "Other"
 
 # --- DATA LOADING ---
-@st.cache_data(show_spinner="Shuffling the Archive...")
-def load_all_data():
+@st.cache_data(show_spinner="Loading Season Data...")
+def load_data():
     files = glob.glob("*.tsv")
     if not files:
         return None
-    
-    all_dfs = []
+    all_chunks = []
     for f in files:
         try:
             temp = pd.read_csv(f, sep='\t', low_memory=False)
             s_match = re.search(r'\d+', f)
-            temp['season_num'] = s_match.group() if s_match else "Unknown"
-            all_dfs.append(temp)
+            temp['season_num'] = s_match.group() if s_match else "??"
+            all_chunks.append(temp)
         except:
             continue
-            
-    if not all_dfs:
+    if not all_chunks:
         return None
-        
-    df = pd.concat(all_dfs, ignore_index=True)
-    # Clean data: remove rows with empty answers or questions
+    df = pd.concat(all_chunks, ignore_index=True)
+    return df.dropna(subset=['answer', 'question']).sample(frac=1).reset_index(drop=True)
+
+# --- EXECUTION ---
+df = load_data()
+
+# Initialize State
+if 'stats' not in st.session_state:
+    st.session_state.stats = {cat: {"correct": 0, "total": 0} for cat in UNIVERSAL_MAP}
+    st.session_state.stats["Other"] = {"correct": 0, "total": 0}
+
+if 'idx' not in st.session_state:
+    st.session_state.idx = 0
+    st.session_state.show = False
+    st.session_state.tag = "Other"
+    st.session_state.ready = False
+
+def next_clue():
+    if df is not None:
+        st.session_state.idx = random.randint(0, len(df) - 1)
+        st.session_state.show = False
+        row = df.iloc[st.session_state.idx]
+        st.session_state.tag = get_tag(row)
+        st.session_state.ready = True
+
+if df is None:
+    st.error("No .tsv files found. Check your GitHub repository.")
+else:
+    if not st.session_state.ready:
