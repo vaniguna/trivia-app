@@ -440,7 +440,9 @@ else:
 
     clue          = df.iloc[st.session_state.idx]
     u_cat         = st.session_state.current_tag
-    clue_value    = int(clue.get('clue_value') or 400)
+    _raw_value    = int(clue.get('clue_value') or 0)
+    clue_value    = _raw_value if _raw_value > 0 else 0
+    clue_value_display = "Final Jeopardy" if _raw_value == 0 else f"${_raw_value}"
     close_enough_on = st.session_state.settings["close_enough"]
     correct_response = str(clue['question'])
     timer_on      = close_enough_on and st.session_state.settings["timer_enabled"]
@@ -483,7 +485,7 @@ else:
     # ── CLUE DISPLAY ──────────────────────────────────────────────────────
     st.markdown(f'<div class="category-box"><div class="category-text">{clue["category"]}</div></div>', unsafe_allow_html=True)
     st.markdown(f"### {clue['answer']}")
-    st.caption(f"Season {clue['season']} | ${clue_value}")
+    st.caption(f"Season {clue['season']} | {clue_value_display}")
 
     # Always-visible tag selector
     sorted_tags = sorted([t for t in ALL_TAGS if t != "Other"]) + ["Other"]
