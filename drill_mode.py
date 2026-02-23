@@ -143,6 +143,35 @@ def _build_queue(deck: dict, srs: dict, shuffled: bool) -> list:
 
     return due_cards + new_cards
 
+def _build_full_queue(deck: dict, srs: dict, shuffled: bool) -> list:
+    """
+    Returns ALL cards in the deck (mastered + due + new), ordered by
+    mastery level so unmastered ones come first, mastered ones last.
+    Used to locate the first unmastered card across the entire deck.
+    """
+    today_str = str(date.today())
+    overdue, upcoming, mastered_cards, new_cards = [], [], [], []
+
+    for card in deck["cards"]:
+        cs = _get_card_state(srs, deck["name"], card["q"])
+        if cs["total"] == 0:
+            new_cards.append(card)
+        elif cs["interval"] >= 21:
+            mastered_cards.append(card)
+        elif cs["due"] <= today_str:
+            overdue.append((cs["due"], card))
+        else:
+            upcoming.append((cs["due"], card))
+
+    overdue.sort(key=lambda x: x[0])
+    upcoming.sort(key=lambda x: x[0])
+
+    result = [c for _, c in overdue] + [c for _, c in upcoming] + new_cards
+    if shuffled:
+        random.shuffle(result)
+    return result + mastered_cards  # mastered always at end
+
+
 def _deck_stats(deck: dict, srs: dict) -> dict:
     today_str = str(date.today())
     total = len(deck["cards"])
@@ -169,6 +198,19 @@ def _deck_stats(deck: dict, srs: dict) -> dict:
         "mastered": mastered,
         "accuracy": accuracy,
     }
+
+# ─── First-unmastered finder ──────────────────────────────────────────────────
+
+def _find_first_unmastered(deck: dict, srs: dict, queue: list) -> int:
+    """
+    Return the index in queue of the first card whose SRS interval < 21 days
+    (i.e. not yet mastered). Returns 0 if all are mastered or queue is empty.
+    """
+    for i, card in enumerate(queue):
+        cs = _get_card_state(srs, deck["name"], card["q"])
+        if cs["interval"] < 21:
+            return i
+    return 0
 
 # ─── Fuzzy grading ────────────────────────────────────────────────────────────
 
@@ -288,6 +330,12 @@ def _render_home(srs):
                     if st.button("⏎ Resume", key=f"resume_{i}", use_container_width=True):
                         _start_session(deck_idx=i, srs=srs, resume=True)
 
+                if stats['seen'] > 0 and stats['mastered'] < stats['total']:
+                    if st.button("⏩ First unmastered", key=f"unmastered_{i}",
+                                 use_container_width=True,
+                                 help="Jump to the first card not yet mastered (interval < 21 days)"):
+                        _start_session(deck_idx=i, srs=srs, resume=False, first_unmastered=True)
+
                 if stats['seen'] > 0:
                     if st.button("Reset", key=f"reset_{i}", use_container_width=True):
                         _reset_deck(srs, deck)
@@ -354,8 +402,11 @@ def _render_deck_overview(srs):
 
 # ─── Session launcher ─────────────────────────────────────────────────────────
 
-def _start_session(deck_idx: int, srs: dict, resume: bool):
-    """Build queue, optionally find resume position, jump to card screen."""
+def _start_session(deck_idx: int, srs: dict, resume: bool, first_unmastered: bool = False):
+    """Build queue, optionally find start position, jump to card screen.
+
+    start_mode priority: first_unmastered > resume > 0
+    """
     deck          = DRILL_DECKS[deck_idx]
     shuffle_prefs = _load_shuffle_prefs()
     shuffled      = shuffle_prefs.get(deck["name"], False)
@@ -369,7 +420,19 @@ def _start_session(deck_idx: int, srs: dict, resume: bool):
 
     start_idx = 0
 
-    if resume:
+    if first_unmastered:
+        # Build the full deck queue (all cards, not just due) so we can scan
+        # for the first unmastered one — regardless of due status.
+        full_queue = _build_full_queue(deck, srs, shuffled=shuffled)
+        unmastered_idx = _find_first_unmastered(deck, srs, full_queue)
+        # Find that card in the session queue; if not present, fall back to 0
+        target_q = full_queue[unmastered_idx]["q"] if full_queue else None
+        if target_q:
+            for i, card in enumerate(queue):
+                if card["q"] == target_q:
+                    start_idx = i
+                    break
+    elif resume:
         resume_positions = _load_resume()
         last_q           = resume_positions.get(deck["name"])
         if last_q:
