@@ -279,6 +279,57 @@ def _save_tag_override(clue_id: str, tag: str):
     except Exception as e:
         st.warning(f"⚠️ Could not save tag: {e}")
 
+# --- 1c. GAME STATS PERSISTENCE (Supabase) ---
+# Weakness tracker stats and winnings are stored in the drill_progress table
+# (same row as SRS data) under the game_stats and winnings columns.
+# Loaded once per browser session; written after every answered clue.
+
+def _load_game_stats() -> tuple[dict, int]:
+    """
+    Returns (stats_dict, winnings_int).
+    stats_dict: {category: {"correct": int, "total": int}}
+    Falls back to empty stats on any failure.
+    """
+    empty_stats = {cat: {"correct": 0, "total": 0} for cat in ALL_TAGS}
+    try:
+        client = _get_supabase()
+        if client is None:
+            return empty_stats, 0
+        result = (
+            client.table("drill_progress")
+            .select("game_stats, winnings")
+            .eq("user_id", "default")
+            .single()
+            .execute()
+        )
+        row = result.data
+        if not row:
+            return empty_stats, 0
+        saved = row.get("game_stats") or {}
+        winnings = int(row.get("winnings") or 0)
+        # Merge saved stats into full tag list (handles new tags added later)
+        stats = empty_stats.copy()
+        for cat, data in saved.items():
+            if cat in stats:
+                stats[cat] = data
+        return stats, winnings
+    except Exception:
+        return empty_stats, 0
+
+def _save_game_stats(stats: dict, winnings: int):
+    """Upsert game stats and winnings back to Supabase."""
+    try:
+        client = _get_supabase()
+        if client is None:
+            return
+        client.table("drill_progress").upsert({
+            "user_id":    "default",
+            "game_stats": stats,
+            "winnings":   winnings,
+        }).execute()
+    except Exception as e:
+        st.warning(f"⚠️ Could not save stats: {e}")
+
 def _prime_tag_cache(pool_df):
     """
     Called once after data loads. Batch-fetches saved tags for all clues
@@ -385,7 +436,10 @@ _prime_tag_cache(df)
 
 # --- 5. STATE MANAGEMENT ---
 if 'stats' not in st.session_state:
-    st.session_state.stats = {cat: {"correct": 0, "total": 0} for cat in ALL_TAGS}
+    # Load persisted stats from Supabase on first load
+    _db_stats, _db_winnings = _load_game_stats()
+    st.session_state.stats    = _db_stats
+    st.session_state.winnings = _db_winnings
 elif set(ALL_TAGS) - set(st.session_state.stats.keys()):
     for tag in ALL_TAGS:
         if tag not in st.session_state.stats:
@@ -470,6 +524,7 @@ def record_and_advance(correct: bool, clue_value: int, u_cat: str):
     st.session_state.stats[u_cat]["total"] += 1
     if not correct:
         st.session_state.winnings -= clue_value
+    _save_game_stats(st.session_state.stats, st.session_state.winnings)
     st.session_state.question_num += 1
     limit = st.session_state.settings["session_length"]
     if limit > 0 and st.session_state.question_num >= limit:
@@ -510,8 +565,9 @@ with tab_game:
             get_next()
             st.rerun()
         if st.button("🔄 Reset All Stats & Start Over", use_container_width=True):
-            st.session_state.stats = {cat: {"correct": 0, "total": 0} for cat in ALL_TAGS}
+            st.session_state.stats    = {cat: {"correct": 0, "total": 0} for cat in ALL_TAGS}
             st.session_state.winnings = 0
+            _save_game_stats(st.session_state.stats, 0)
             st.session_state.session_active = True
             st.session_state.question_num = 0
             get_next()
@@ -776,8 +832,9 @@ for cat, data in st.session_state.stats.items():
 
 st.sidebar.divider()
 if st.sidebar.button("🔄 REFRESH ALL STATS", use_container_width=True):
-    st.session_state.stats = {cat: {"correct": 0, "total": 0} for cat in ALL_TAGS}
+    st.session_state.stats    = {cat: {"correct": 0, "total": 0} for cat in ALL_TAGS}
     st.session_state.winnings = 0
+    _save_game_stats(st.session_state.stats, 0)
     st.rerun()
 
 with tab_drill:
