@@ -7,6 +7,8 @@ Each deck is a dict with:
   - cards: list of {"q": question, "a": answer, "hint": optional hint}
 """
 
+from presidents_deck import PRESIDENTS_DECK
+
 DRILL_DECKS = [
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -68,59 +70,7 @@ DRILL_DECKS = [
         ]
     },
 
-    # ─────────────────────────────────────────────────────────────────────────
-    {
-        "name": "US Presidents",
-        "icon": "🇺🇸",
-        "description": "All US presidents in order, with key facts",
-        "cards": [
-            {"q": "1st President of the United States", "a": "George Washington", "hint": "Commander of the Continental Army"},
-            {"q": "2nd President of the United States", "a": "John Adams", "hint": "First to live in the White House"},
-            {"q": "3rd President of the United States", "a": "Thomas Jefferson", "hint": "Author of the Declaration of Independence"},
-            {"q": "4th President of the United States", "a": "James Madison", "hint": "Father of the Constitution"},
-            {"q": "5th President of the United States", "a": "James Monroe", "hint": "Monroe Doctrine"},
-            {"q": "6th President of the United States", "a": "John Quincy Adams", "hint": "Son of the 2nd president"},
-            {"q": "7th President of the United States", "a": "Andrew Jackson", "hint": "First president from a log cabin"},
-            {"q": "8th President of the United States", "a": "Martin Van Buren", "hint": "First president born a US citizen"},
-            {"q": "9th President of the United States", "a": "William Henry Harrison", "hint": "Shortest presidency — died after 31 days"},
-            {"q": "10th President of the United States", "a": "John Tyler", "hint": "First to assume office after president's death"},
-            {"q": "11th President of the United States", "a": "James K. Polk", "hint": "Oversaw westward expansion to the Pacific"},
-            {"q": "12th President of the United States", "a": "Zachary Taylor", "hint": "Mexican-American War hero"},
-            {"q": "13th President of the United States", "a": "Millard Fillmore", "hint": "Signed the Compromise of 1850"},
-            {"q": "14th President of the United States", "a": "Franklin Pierce", "hint": "Kansas-Nebraska Act"},
-            {"q": "15th President of the United States", "a": "James Buchanan", "hint": "Only president never to marry"},
-            {"q": "16th President of the United States", "a": "Abraham Lincoln", "hint": "Emancipation Proclamation; assassinated 1865"},
-            {"q": "17th President of the United States", "a": "Andrew Johnson", "hint": "First president to be impeached"},
-            {"q": "18th President of the United States", "a": "Ulysses S. Grant", "hint": "Union general who accepted Lee's surrender"},
-            {"q": "19th President of the United States", "a": "Rutherford B. Hayes", "hint": "Ended Reconstruction"},
-            {"q": "20th President of the United States", "a": "James A. Garfield", "hint": "Assassinated after only 200 days in office"},
-            {"q": "21st President of the United States", "a": "Chester A. Arthur", "hint": "Civil service reform"},
-            {"q": "22nd & 24th President", "a": "Grover Cleveland", "hint": "Only president to serve two non-consecutive terms"},
-            {"q": "23rd President of the United States", "a": "Benjamin Harrison", "hint": "Grandson of the 9th president"},
-            {"q": "25th President of the United States", "a": "William McKinley", "hint": "Spanish-American War; assassinated 1901"},
-            {"q": "26th President of the United States", "a": "Theodore Roosevelt", "hint": "Youngest president; trust-buster"},
-            {"q": "27th President of the United States", "a": "William Howard Taft", "hint": "Later became Chief Justice of the Supreme Court"},
-            {"q": "28th President of the United States", "a": "Woodrow Wilson", "hint": "Led US in World War I; proposed League of Nations"},
-            {"q": "29th President of the United States", "a": "Warren G. Harding", "hint": "Teapot Dome scandal"},
-            {"q": "30th President of the United States", "a": "Calvin Coolidge", "hint": "Silent Cal; Roaring Twenties"},
-            {"q": "31st President of the United States", "a": "Herbert Hoover", "hint": "Presided over the start of the Great Depression"},
-            {"q": "32nd President of the United States", "a": "Franklin D. Roosevelt", "hint": "New Deal; only president elected four times"},
-            {"q": "33rd President of the United States", "a": "Harry S. Truman", "hint": "Ordered atomic bombs dropped on Japan"},
-            {"q": "34th President of the United States", "a": "Dwight D. Eisenhower", "hint": "Supreme Allied Commander in WWII; Interstate Highway System"},
-            {"q": "35th President of the United States", "a": "John F. Kennedy", "hint": "Youngest elected president; assassinated 1963"},
-            {"q": "36th President of the United States", "a": "Lyndon B. Johnson", "hint": "Great Society; Civil Rights Act of 1964"},
-            {"q": "37th President of the United States", "a": "Richard Nixon", "hint": "Watergate; resigned 1974"},
-            {"q": "38th President of the United States", "a": "Gerald Ford", "hint": "Only president never elected to President or VP"},
-            {"q": "39th President of the United States", "a": "Jimmy Carter", "hint": "Camp David Accords; Nobel Peace Prize 2002"},
-            {"q": "40th President of the United States", "a": "Ronald Reagan", "hint": "Former actor; Cold War's end"},
-            {"q": "41st President of the United States", "a": "George H.W. Bush", "hint": "Gulf War; father of the 43rd president"},
-            {"q": "42nd President of the United States", "a": "Bill Clinton", "hint": "Impeached by the House; longest peacetime expansion"},
-            {"q": "43rd President of the United States", "a": "George W. Bush", "hint": "9/11; Iraq War"},
-            {"q": "44th President of the United States", "a": "Barack Obama", "hint": "First African-American president; ACA"},
-            {"q": "45th President of the United States", "a": "Donald Trump", "hint": "Impeached twice; 45th and 47th president"},
-            {"q": "46th President of the United States", "a": "Joe Biden", "hint": "Oldest president; withdrew from 2024 race"},
-        ]
-    },
+    PRESIDENTS_DECK,
 
     # ─────────────────────────────────────────────────────────────────────────
     {
