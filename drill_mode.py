@@ -2,24 +2,23 @@
 drill_mode.py — Spaced repetition drill module for the Jeopardy Trainer.
 Call render_drill_mode() from the main app to embed this as a tab.
 
-New features:
-  - Random order toggle (shuffles session queue while preserving SRS priority)
-  - Back / Forward navigation through visited cards
-  - Re-rating a back-visited card replaces the original SRS rating
-  - ⏭ Jump to frontier button (appears in nav bar only when behind the frontier)
-  - Resume: picks up at the last-viewed card, continues forward through remaining
-    queue, respecting the shuffle setting that was active when you left
+Persistence:
+  Progress (SRS state, resume positions, shuffle prefs) is stored in Supabase.
+  Credentials are read from Streamlit secrets — never hard-coded here.
 
-Session state model:
-  drill_queue       list of card dicts for this session (ordered or shuffled)
-  drill_card_idx    current position in queue (the "cursor")
-  drill_frontier    highest index reached so far (cards beyond here are unseen)
-  drill_show_ans    whether answer is revealed for current card
-  drill_user_ans    last typed answer text
-  drill_result      tuple (type, sim, user_ans) or None
-  drill_shuffled    bool — was shuffle on when session started?
+  Required in Streamlit Cloud → Settings → Secrets:
+    SUPABASE_URL = "https://xxxxxxxxxxxx.supabase.co"
+    SUPABASE_KEY = "your-anon-key-here"
 
-  drill_resume_key  persists across page refreshes so we can find resume position
+  Required Supabase table (run once in SQL Editor):
+    CREATE TABLE drill_progress (
+        user_id       TEXT PRIMARY KEY,
+        srs           JSONB NOT NULL DEFAULT '{}',
+        resume        JSONB NOT NULL DEFAULT '{}',
+        shuffle_prefs JSONB NOT NULL DEFAULT '{}',
+        updated_at    TIMESTAMPTZ DEFAULT NOW()
+    );
+    INSERT INTO drill_progress (user_id) VALUES ('default');
 """
 
 import streamlit as st
@@ -29,54 +28,116 @@ import random
 from datetime import date, timedelta
 from drill_data import DRILL_DECKS
 
-# ─── Persistence helpers ──────────────────────────────────────────────────────
+# ─── Supabase client ──────────────────────────────────────────────────────────
 
-STORAGE_KEY  = "drill_srs_state"
-RESUME_KEY   = "drill_resume_positions"   # {deck_name: question_text}
-SHUFFLE_KEY  = "drill_shuffle_prefs"      # {deck_name: bool}
+@st.cache_resource
+def _get_supabase():
+    """Create and cache the Supabase client for the lifetime of the server."""
+    try:
+        from supabase import create_client
+        url = st.secrets["SUPABASE_URL"]
+        key = st.secrets["SUPABASE_KEY"]
+        return create_client(url, key)
+    except Exception as e:
+        st.error(f"❌ Could not connect to Supabase: {e}")
+        return None
+
+USER_ID = "default"  # single-user app; extend this for multi-user later
+
+# ─── Database I/O ─────────────────────────────────────────────────────────────
+
+def _empty_progress() -> dict:
+    return {"srs": {}, "resume": {}, "shuffle_prefs": {}}
+
+def _load_from_db() -> dict:
+    """Fetch the progress row from Supabase. Returns empty structure on failure."""
+    try:
+        client = _get_supabase()
+        if client is None:
+            return _empty_progress()
+        result = (
+            client.table("drill_progress")
+            .select("srs, resume, shuffle_prefs")
+            .eq("user_id", USER_ID)
+            .single()
+            .execute()
+        )
+        row = result.data
+        if not row:
+            return _empty_progress()
+        return {
+            "srs":           row.get("srs")           or {},
+            "resume":        row.get("resume")        or {},
+            "shuffle_prefs": row.get("shuffle_prefs") or {},
+        }
+    except Exception as e:
+        st.warning(f"⚠️ Could not load progress from database: {e}")
+        return _empty_progress()
+
+def _save_to_db(data: dict):
+    """Upsert the full progress dict back to Supabase."""
+    try:
+        client = _get_supabase()
+        if client is None:
+            return
+        client.table("drill_progress").upsert({
+            "user_id":       USER_ID,
+            "srs":           data.get("srs",           {}),
+            "resume":        data.get("resume",        {}),
+            "shuffle_prefs": data.get("shuffle_prefs", {}),
+            "updated_at":    date.today().isoformat(),
+        }).execute()
+    except Exception as e:
+        st.warning(f"⚠️ Could not save progress to database: {e}")
+
+# ─── In-memory cache (one DB read per browser session, write-through on save) ─
+
+def _get_progress() -> dict:
+    """Load from DB the first time per browser session, then use cached copy."""
+    if "drill_progress" not in st.session_state:
+        st.session_state.drill_progress = _load_from_db()
+    return st.session_state.drill_progress
+
+def _flush():
+    """Write current in-memory progress to Supabase."""
+    _save_to_db(_get_progress())
+
+# ─── Typed section accessors ──────────────────────────────────────────────────
 
 def _load_srs() -> dict:
-    raw = st.session_state.get(STORAGE_KEY, "{}")
-    try:
-        return json.loads(raw) if isinstance(raw, str) else raw
-    except Exception:
-        return {}
+    return _get_progress().get("srs", {})
 
-def _save_srs(state: dict):
-    st.session_state[STORAGE_KEY] = state
+def _save_srs(srs: dict):
+    _get_progress()["srs"] = srs
+    _flush()
 
 def _load_resume() -> dict:
-    raw = st.session_state.get(RESUME_KEY, "{}")
-    try:
-        return json.loads(raw) if isinstance(raw, str) else raw
-    except Exception:
-        return {}
+    return _get_progress().get("resume", {})
 
 def _save_resume(positions: dict):
-    st.session_state[RESUME_KEY] = positions
+    _get_progress()["resume"] = positions
+    _flush()
 
 def _load_shuffle_prefs() -> dict:
-    raw = st.session_state.get(SHUFFLE_KEY, "{}")
-    try:
-        return json.loads(raw) if isinstance(raw, str) else raw
-    except Exception:
-        return {}
+    return _get_progress().get("shuffle_prefs", {})
 
 def _save_shuffle_prefs(prefs: dict):
-    st.session_state[SHUFFLE_KEY] = prefs
+    _get_progress()["shuffle_prefs"] = prefs
+    _flush()
+
+# ─── Card-level SRS helpers ───────────────────────────────────────────────────
 
 def _card_key(deck_name: str, q: str) -> str:
     return f"{deck_name}||{q}"
 
 def _get_card_state(srs: dict, deck_name: str, q: str) -> dict:
-    key = _card_key(deck_name, q)
-    return srs.get(key, {
-        "ease": 2.5,
-        "interval": 1,
+    return srs.get(_card_key(deck_name, q), {
+        "ease":        2.5,
+        "interval":    1,
         "repetitions": 0,
-        "due": str(date.today()),
-        "correct": 0,
-        "total": 0,
+        "due":         str(date.today()),
+        "correct":     0,
+        "total":       0,
     })
 
 def _save_card_state(srs: dict, deck_name: str, q: str, card_state: dict):
@@ -85,9 +146,9 @@ def _save_card_state(srs: dict, deck_name: str, q: str, card_state: dict):
 
 # ─── SM-2 update ──────────────────────────────────────────────────────────────
 
-def _apply_rating(card_state: dict, rating: int) -> dict:
+def _apply_rating(cs: dict, rating: int) -> dict:
     """rating: 1=Wrong, 3=Hard, 4=Good, 5=Easy"""
-    cs    = card_state.copy()
+    cs    = cs.copy()
     today = date.today()
 
     if rating == 1:
@@ -115,15 +176,10 @@ def _apply_rating(card_state: dict, rating: int) -> dict:
     cs["due"]   = str(today + timedelta(days=cs["interval"]))
     return cs
 
-# ─── Queue builder ────────────────────────────────────────────────────────────
+# ─── Queue builders ───────────────────────────────────────────────────────────
 
 def _build_queue(deck: dict, srs: dict, shuffled: bool) -> list:
-    """
-    Returns cards due today/overdue + new (never-seen) cards.
-    Due cards sorted by due date; new cards appended after.
-    If shuffled=True, each group is independently shuffled (preserving
-    the SRS principle that overdue cards generally precede new ones).
-    """
+    """Due today/overdue + never-seen cards. Mastered-and-not-due excluded."""
     today_str = str(date.today())
     due, new_cards = [], []
 
@@ -144,11 +200,8 @@ def _build_queue(deck: dict, srs: dict, shuffled: bool) -> list:
     return due_cards + new_cards
 
 def _build_full_queue(deck: dict, srs: dict, shuffled: bool) -> list:
-    """
-    Returns ALL cards in the deck (mastered + due + new), ordered by
-    mastery level so unmastered ones come first, mastered ones last.
-    Used to locate the first unmastered card across the entire deck.
-    """
+    """All cards: overdue → upcoming → new → mastered.
+    Used only for locating the first unmastered card across the whole deck."""
     today_str = str(date.today())
     overdue, upcoming, mastered_cards, new_cards = [], [], [], []
 
@@ -165,12 +218,12 @@ def _build_full_queue(deck: dict, srs: dict, shuffled: bool) -> list:
 
     overdue.sort(key=lambda x: x[0])
     upcoming.sort(key=lambda x: x[0])
-
     result = [c for _, c in overdue] + [c for _, c in upcoming] + new_cards
     if shuffled:
         random.shuffle(result)
-    return result + mastered_cards  # mastered always at end
+    return result + mastered_cards
 
+# ─── Stats & helpers ──────────────────────────────────────────────────────────
 
 def _deck_stats(deck: dict, srs: dict) -> dict:
     today_str = str(date.today())
@@ -199,13 +252,7 @@ def _deck_stats(deck: dict, srs: dict) -> dict:
         "accuracy": accuracy,
     }
 
-# ─── First-unmastered finder ──────────────────────────────────────────────────
-
 def _find_first_unmastered(deck: dict, srs: dict, queue: list) -> int:
-    """
-    Return the index in queue of the first card whose SRS interval < 21 days
-    (i.e. not yet mastered). Returns 0 if all are mastered or queue is empty.
-    """
     for i, card in enumerate(queue):
         cs = _get_card_state(srs, deck["name"], card["q"])
         if cs["interval"] < 21:
@@ -261,21 +308,21 @@ def _reset_card_display():
     st.session_state.drill_result   = None
 
 def _go_to_card(idx: int):
-    """Navigate to a specific index, updating frontier and persisting resume."""
+    """Move cursor, update frontier, persist resume position to DB."""
     st.session_state.drill_card_idx = idx
     st.session_state.drill_frontier = max(st.session_state.drill_frontier, idx)
 
     queue    = st.session_state.drill_queue
     deck_idx = st.session_state.drill_deck_idx
     if queue and deck_idx is not None and idx < len(queue):
-        deck   = DRILL_DECKS[deck_idx]
-        resume = _load_resume()
-        resume[deck["name"]] = queue[idx]["q"]
-        _save_resume(resume)
+        deck      = DRILL_DECKS[deck_idx]
+        positions = _load_resume()
+        positions[deck["name"]] = queue[idx]["q"]
+        _save_resume(positions)
 
     _reset_card_display()
 
-# ─── Main render ──────────────────────────────────────────────────────────────
+# ─── Main entry point ─────────────────────────────────────────────────────────
 
 def render_drill_mode():
     _init_session_state()
@@ -333,15 +380,15 @@ def _render_home(srs):
                 if stats['seen'] > 0 and stats['mastered'] < stats['total']:
                     if st.button("⏩ First unmastered", key=f"unmastered_{i}",
                                  use_container_width=True,
-                                 help="Jump to the first card not yet mastered (interval < 21 days)"):
+                                 help="Jump to the first card not yet mastered"):
                         _start_session(deck_idx=i, srs=srs, resume=False, first_unmastered=True)
 
                 if stats['seen'] > 0:
                     if st.button("Reset", key=f"reset_{i}", use_container_width=True):
                         _reset_deck(srs, deck)
-                        resume = _load_resume()
-                        resume.pop(deck["name"], None)
-                        _save_resume(resume)
+                        positions = _load_resume()
+                        positions.pop(deck["name"], None)
+                        _save_resume(positions)
                         st.rerun()
 
             st.divider()
@@ -349,9 +396,9 @@ def _render_home(srs):
 # ─── Deck overview ────────────────────────────────────────────────────────────
 
 def _render_deck_overview(srs):
-    deck   = DRILL_DECKS[st.session_state.drill_deck_idx]
-    stats  = _deck_stats(deck, srs)
-    queue  = _build_queue(deck, srs, shuffled=False)  # for count preview
+    deck  = DRILL_DECKS[st.session_state.drill_deck_idx]
+    stats = _deck_stats(deck, srs)
+    queue = _build_queue(deck, srs, shuffled=False)
 
     shuffle_prefs = _load_shuffle_prefs()
     deck_shuffle  = shuffle_prefs.get(deck["name"], False)
@@ -368,7 +415,6 @@ def _render_deck_overview(srs):
 
     st.write("")
 
-    # Shuffle toggle
     new_shuffle = st.toggle(
         "🔀 Random order",
         value=deck_shuffle,
@@ -403,10 +449,6 @@ def _render_deck_overview(srs):
 # ─── Session launcher ─────────────────────────────────────────────────────────
 
 def _start_session(deck_idx: int, srs: dict, resume: bool, first_unmastered: bool = False):
-    """Build queue, optionally find start position, jump to card screen.
-
-    start_mode priority: first_unmastered > resume > 0
-    """
     deck          = DRILL_DECKS[deck_idx]
     shuffle_prefs = _load_shuffle_prefs()
     shuffled      = shuffle_prefs.get(deck["name"], False)
@@ -421,20 +463,16 @@ def _start_session(deck_idx: int, srs: dict, resume: bool, first_unmastered: boo
     start_idx = 0
 
     if first_unmastered:
-        # Build the full deck queue (all cards, not just due) so we can scan
-        # for the first unmastered one — regardless of due status.
-        full_queue = _build_full_queue(deck, srs, shuffled=shuffled)
+        full_queue     = _build_full_queue(deck, srs, shuffled=shuffled)
         unmastered_idx = _find_first_unmastered(deck, srs, full_queue)
-        # Find that card in the session queue; if not present, fall back to 0
-        target_q = full_queue[unmastered_idx]["q"] if full_queue else None
+        target_q       = full_queue[unmastered_idx]["q"] if full_queue else None
         if target_q:
             for i, card in enumerate(queue):
                 if card["q"] == target_q:
                     start_idx = i
                     break
     elif resume:
-        resume_positions = _load_resume()
-        last_q           = resume_positions.get(deck["name"])
+        last_q = _load_resume().get(deck["name"])
         if last_q:
             for i, card in enumerate(queue):
                 if card["q"] == last_q:
@@ -451,20 +489,20 @@ def _start_session(deck_idx: int, srs: dict, resume: bool, first_unmastered: boo
     st.session_state.drill_screen          = "card"
     _reset_card_display()
 
-    # Persist resume position immediately
-    resume_positions = _load_resume()
-    resume_positions[deck["name"]] = queue[start_idx]["q"]
-    _save_resume(resume_positions)
+    # Persist starting position immediately
+    positions = _load_resume()
+    positions[deck["name"]] = queue[start_idx]["q"]
+    _save_resume(positions)
 
     st.rerun()
 
 # ─── Card screen ──────────────────────────────────────────────────────────────
 
 def _render_card(srs):
-    deck      = DRILL_DECKS[st.session_state.drill_deck_idx]
-    queue     = st.session_state.drill_queue
-    idx       = st.session_state.drill_card_idx
-    frontier  = st.session_state.drill_frontier
+    deck     = DRILL_DECKS[st.session_state.drill_deck_idx]
+    queue    = st.session_state.drill_queue
+    idx      = st.session_state.drill_card_idx
+    frontier = st.session_state.drill_frontier
 
     if idx >= len(queue):
         st.session_state.drill_screen = "session_done"
@@ -484,18 +522,12 @@ def _render_card(srs):
         f"{deck['icon']} {deck['name']}  •  {order_label}"
     )
 
-    # ── Navigation bar: ← prev  [n/total]  next →  ⏭ ─────────────────────
-    can_go_back    = idx > 0
-    can_go_forward = idx < total - 1
-    show_jump      = behind_frontier  # ⏭ only visible when behind frontier
-
-    if show_jump:
-        nav_cols = st.columns([1, 2, 1, 1])
-    else:
-        nav_cols = st.columns([1, 2, 1])
+    # ── Navigation bar: ← prev  [n/total]  next →  ⏭ new ─────────────────
+    show_jump = behind_frontier
+    nav_cols  = st.columns([1, 2, 1, 1]) if show_jump else st.columns([1, 2, 1])
 
     with nav_cols[0]:
-        if st.button("← Prev", disabled=not can_go_back,
+        if st.button("← Prev", disabled=(idx == 0),
                      use_container_width=True, key="nav_prev"):
             _go_to_card(idx - 1)
             st.rerun()
@@ -508,7 +540,7 @@ def _render_card(srs):
         )
 
     with nav_cols[2]:
-        if st.button("Next →", disabled=not can_go_forward,
+        if st.button("Next →", disabled=(idx >= total - 1),
                      use_container_width=True, key="nav_next"):
             _go_to_card(idx + 1)
             st.rerun()
@@ -578,7 +610,7 @@ def _render_card(srs):
                 st.rerun()
 
     else:
-        # ── Answer reveal card ────────────────────────────────────────────────
+        # ── Answer reveal ─────────────────────────────────────────────────────
         st.markdown(
             f"""
             <div style="
@@ -605,7 +637,6 @@ def _render_card(srs):
             else:
                 st.error(f"❌ No match. Similarity: {sim}%  ·  You wrote: *\"{user_ans}\"*")
 
-        # ── Rating buttons ────────────────────────────────────────────────────
         st.markdown("**How did you do?**")
 
         if result_type == "check" and user_ans:
@@ -619,8 +650,7 @@ def _render_card(srs):
                     _submit_rating(srs, deck, card, 3, at_frontier)
             with c3:
                 label = "✅ Easy!" if auto_correct else "✅ Got It"
-                if st.button(label, use_container_width=True, type="primary",
-                             key=f"r5_{idx}"):
+                if st.button(label, use_container_width=True, type="primary", key=f"r5_{idx}"):
                     _submit_rating(srs, deck, card, 5 if auto_correct else 4, at_frontier)
         else:
             c1, c2, c3, c4 = st.columns(4)
@@ -631,8 +661,7 @@ def _render_card(srs):
                 if st.button("😅 Hard", use_container_width=True, key=f"r3_{idx}"):
                     _submit_rating(srs, deck, card, 3, at_frontier)
             with c3:
-                if st.button("👍 Good", use_container_width=True, type="primary",
-                             key=f"r4_{idx}"):
+                if st.button("👍 Good", use_container_width=True, type="primary", key=f"r4_{idx}"):
                     _submit_rating(srs, deck, card, 4, at_frontier)
             with c4:
                 if st.button("⚡ Easy", use_container_width=True, key=f"r5_{idx}"):
@@ -645,51 +674,31 @@ def _render_card(srs):
         if behind_frontier:
             st.caption("ℹ️ Rating a back-visited card replaces its previous SRS rating.")
 
-    # ── Exit ──────────────────────────────────────────────────────────────────
     st.write("")
     if st.button("↩ Exit Session", key="exit_session"):
         st.session_state.drill_screen = "home"
         st.rerun()
 
-
 # ─── Rating submission ────────────────────────────────────────────────────────
 
 def _submit_rating(srs: dict, deck: dict, card: dict, rating: int, at_frontier: bool):
-    """
-    Save SRS rating — always replaces the previous rating for this card.
-
-    Back-navigated re-ratings:
-      - Update SRS (overwrite previous)
-      - Do NOT advance session counters (avoids double-counting)
-      - Do NOT re-insert wrong cards into queue (already handled at frontier)
-      - Just refresh the card display after saving
-
-    Frontier ratings (normal flow):
-      - Update SRS
-      - Advance session counters
-      - Re-insert wrong cards 3 positions ahead
-      - Advance cursor to next card (or end session)
-    """
     cs = _get_card_state(srs, deck["name"], card["q"])
 
-    # If re-rating a previously rated card, back out the last increment
-    # so _apply_rating's +1 to total/correct stays accurate
+    # Back out previous rating's contribution before re-applying
     if cs["total"] > 0:
-        prev_was_correct = cs.get("repetitions", 0) > 0
+        was_correct   = cs.get("correct", 0) > 0 and cs.get("repetitions", 0) > 0
         cs["total"]   = max(0, cs["total"] - 1)
-        if prev_was_correct:
+        if was_correct:
             cs["correct"] = max(0, cs.get("correct", 0) - 1)
 
     cs = _apply_rating(cs, rating)
-    _save_card_state(srs, deck["name"], card["q"], cs)
+    _save_card_state(srs, deck["name"], card["q"], cs)  # writes to Supabase
 
     if at_frontier:
-        # Session counters
         if rating >= 4:
             st.session_state.drill_session_correct += 1
         st.session_state.drill_session_total += 1
 
-        # Wrong: re-insert 3 positions ahead
         if rating == 1:
             queue       = st.session_state.drill_queue
             idx         = st.session_state.drill_card_idx
@@ -697,23 +706,20 @@ def _submit_rating(srs: dict, deck: dict, card: dict, rating: int, at_frontier: 
             queue.insert(reinsert_at, card)
             st.session_state.drill_queue = queue
 
-        # Advance cursor
         new_idx = st.session_state.drill_card_idx + 1
         if new_idx >= len(st.session_state.drill_queue):
-            resume = _load_resume()
-            resume.pop(deck["name"], None)
-            _save_resume(resume)
+            positions = _load_resume()
+            positions.pop(deck["name"], None)
+            _save_resume(positions)
             st.session_state.drill_screen = "session_done"
             st.rerun()
         else:
             _go_to_card(new_idx)
             st.session_state.drill_frontier = new_idx
     else:
-        # Re-rating a back-visited card: just refresh display
         _reset_card_display()
 
     st.rerun()
-
 
 # ─── Session done ─────────────────────────────────────────────────────────────
 
@@ -753,7 +759,6 @@ def _render_session_done(srs):
             st.session_state.drill_screen = "home"
             st.rerun()
 
-
 # ─── Reset helper ─────────────────────────────────────────────────────────────
 
 def _reset_deck(srs: dict, deck: dict):
@@ -761,4 +766,4 @@ def _reset_deck(srs: dict, deck: dict):
         key = _card_key(deck["name"], card["q"])
         if key in srs:
             del srs[key]
-    _save_srs(srs)
+    _save_srs(srs)  # writes to Supabase
