@@ -4,6 +4,7 @@ import random
 import glob
 import re
 import os
+import hashlib
 from drill_mode import render_drill_mode
 
 st.set_page_config(page_title="Jeopardy! Pro Trainer", page_icon="🎓", layout="centered")
@@ -225,7 +226,85 @@ def identify_universal_cat(row):
 
     return "Other"
 
-# --- 2. FUZZY ANSWER MATCHING ---
+# --- 1b. CLUE TAG PERSISTENCE (Supabase) ---
+# Manual tag overrides are saved per-clue so the correct tag is always shown.
+# Batch-fetched at session start; zero latency during play.
+
+@st.cache_resource
+def _get_supabase():
+    """Cached Supabase client — created once per server lifetime."""
+    try:
+        from supabase import create_client
+        return create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
+    except Exception as e:
+        st.warning(f"⚠️ Supabase unavailable: {e}")
+        return None
+
+def _clue_id(row) -> str:
+    """Stable fingerprint for a clue: sha256 of category+answer+question."""
+    raw = f"{row.get('category','')}{row.get('answer','')}{row.get('question','')}"
+    return hashlib.sha256(raw.encode()).hexdigest()[:32]
+
+def _fetch_tag_overrides(clue_ids: list[str]) -> dict:
+    """
+    Batch-fetch saved tags for a list of clue_ids from Supabase.
+    Returns {clue_id: tag_string}. Empty dict on failure.
+    """
+    if not clue_ids:
+        return {}
+    try:
+        client = _get_supabase()
+        if client is None:
+            return {}
+        result = (
+            client.table("clue_tags")
+            .select("clue_id, tag")
+            .in_("clue_id", clue_ids)
+            .execute()
+        )
+        return {row["clue_id"]: row["tag"] for row in (result.data or [])}
+    except Exception:
+        return {}
+
+def _save_tag_override(clue_id: str, tag: str):
+    """Upsert a single manual tag override to Supabase."""
+    try:
+        client = _get_supabase()
+        if client is None:
+            return
+        client.table("clue_tags").upsert({
+            "clue_id": clue_id,
+            "tag":     tag,
+        }).execute()
+    except Exception as e:
+        st.warning(f"⚠️ Could not save tag: {e}")
+
+def _prime_tag_cache(pool_df):
+    """
+    Called once after data loads. Batch-fetches saved tags for all clues
+    in the current filtered pool and stores them in session_state.
+    Subsequent lookups are pure dict reads — no DB calls during play.
+    """
+    if pool_df is None or "tag_cache" in st.session_state:
+        return
+    clue_ids = [_clue_id(pool_df.iloc[i]) for i in range(len(pool_df))]
+    st.session_state.tag_cache = _fetch_tag_overrides(clue_ids)
+    # Also store a mapping from clue_id → df index for quick reverse lookup
+    st.session_state.clue_id_map = {
+        _clue_id(pool_df.iloc[i]): i for i in range(len(pool_df))
+    }
+
+def get_tag_for_clue(row) -> str:
+    """
+    Return the tag for a clue: DB override if saved, otherwise run engine.
+    """
+    cid = _clue_id(row)
+    cache = st.session_state.get("tag_cache", {})
+    if cid in cache:
+        return cache[cid]
+    return identify_universal_cat(row)
+
+
 def normalize(text):
     """Strip articles, punctuation, extra whitespace, lowercase."""
     text = str(text).lower().strip()
@@ -302,6 +381,7 @@ def load_all_seasons():
     return df.dropna(subset=['answer', 'question']).sample(frac=1).reset_index(drop=True)
 
 df = load_all_seasons()
+_prime_tag_cache(df)
 
 # --- 5. STATE MANAGEMENT ---
 if 'stats' not in st.session_state:
@@ -379,7 +459,7 @@ def get_next():
         st.session_state.timed_out = False
         st.session_state.clue_start_time = time.time()
         row = df.iloc[st.session_state.idx]
-        st.session_state.current_tag = identify_universal_cat(row)
+        st.session_state.current_tag = get_tag_for_clue(row)
         st.session_state.initialized = True
 
 def record_and_advance(correct: bool, clue_value: int, u_cat: str):
@@ -500,6 +580,11 @@ with tab_game:
         label_visibility="collapsed"
     )
     if selected_tag != st.session_state.current_tag:
+        # Save override to Supabase and update local cache
+        cid = _clue_id(clue)
+        _save_tag_override(cid, selected_tag)
+        if "tag_cache" in st.session_state:
+            st.session_state.tag_cache[cid] = selected_tag
         st.session_state.current_tag = selected_tag
         u_cat = selected_tag
         st.rerun()
