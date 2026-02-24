@@ -356,30 +356,56 @@ def get_tag_for_clue(row) -> str:
     return identify_universal_cat(row)
 
 
+# Presidents whose last name alone is ambiguous (multiple presidents share it)
+SHARED_SURNAMES = {"adams", "harrison", "johnson", "roosevelt", "tyler", "bush"}
+
+# Known aliases → canonical form used for matching
+PRESIDENT_ALIASES = {
+    "jfk":             "john kennedy",
+    "fdr":             "franklin roosevelt",
+    "lbj":             "lyndon johnson",
+    "teddy":           "theodore roosevelt",
+    "teddy roosevelt": "theodore roosevelt",
+    "ike":             "eisenhower",
+}
+
 def normalize(text):
     """Strip articles, punctuation, extra whitespace, lowercase."""
     text = str(text).lower().strip()
-    text = re.sub(r'\b(a|an|the)\b', '', text)          # remove articles
-    text = re.sub(r'[^a-z0-9\s]', '', text)              # remove punctuation
+    text = re.sub(r'\b(a|an|the)\b', '', text)
+    text = re.sub(r'[^a-z0-9\s]', '', text)
     text = re.sub(r'\s+', ' ', text).strip()
     return text
 
 def fuzzy_match(user_ans, correct_ans, threshold=75):
     """
     Returns (is_correct: bool, score: int).
-    Uses character-level similarity on normalized strings.
-    Falls back gracefully if difflib is unavailable.
+    - Rejects ambiguous shared presidential surnames (Adams, Harrison, Johnson,
+      Roosevelt, Tyler, Bush) unless a first name is also provided.
+    - Accepts aliases: JFK, FDR, LBJ, Teddy (Roosevelt), Ike (Eisenhower).
+    - Otherwise uses character-level fuzzy similarity.
     """
     import difflib
-    u = normalize(user_ans)
-    c = normalize(correct_ans)
-    if not u:
+    u_raw  = normalize(user_ans)
+    c_norm = normalize(correct_ans)
+
+    if not u_raw:
         return False, 0
-    # SequenceMatcher ratio is 0-1; multiply by 100 for a percentage score
-    ratio = difflib.SequenceMatcher(None, u, c).ratio() * 100
-    # Also check if the user answer is fully contained in correct (or vice versa)
-    # handles cases like "napoleon" matching "napoleon bonaparte"
-    contained = (u in c) or (c in u)
+
+    # Reject bare shared surname (e.g. "Roosevelt" with no first name)
+    parts = u_raw.split()
+    if len(parts) == 1 and parts[0] in SHARED_SURNAMES:
+        return False, 0
+
+    # Expand known aliases
+    u = PRESIDENT_ALIASES.get(u_raw, u_raw)
+
+    # Alias substring match
+    if u in c_norm or c_norm in u:
+        return True, 100
+
+    ratio = difflib.SequenceMatcher(None, u, c_norm).ratio() * 100
+    contained = (u in c_norm) or (c_norm in u)
     score = int(max(ratio, 100 if contained else 0))
     return score >= threshold, min(score, 100)
 
@@ -470,6 +496,10 @@ else:
         if k not in st.session_state.settings:
             st.session_state.settings[k] = v
 
+for k, v in [("clue_history", []), ("history_pos", -1)]:
+    if k not in st.session_state:
+        st.session_state[k] = v
+
 if 'idx' not in st.session_state:
     st.session_state.idx = 0
     st.session_state.show = False
@@ -477,10 +507,15 @@ if 'idx' not in st.session_state:
     st.session_state.initialized = False
     st.session_state.user_answer = ""
     st.session_state.match_result = None
-    st.session_state.question_num = 0       # questions answered this session
-    st.session_state.session_active = True  # False when session limit reached
-    st.session_state.clue_start_time = None # when the current clue was shown
-    st.session_state.timed_out = False      # True if timer expired on this clue
+    st.session_state.question_num = 0
+    st.session_state.session_active = True
+    st.session_state.clue_start_time = None
+    st.session_state.timed_out = False
+    # History for back/forward navigation (last 25 answered clues)
+    # Each entry: {"idx": df_idx, "tag": str, "correct": bool, "clue_value": int,
+    #              "user_answer": str, "match_result": tuple|None, "show": bool}
+    st.session_state.clue_history = []
+    st.session_state.history_pos  = -1   # -1 = live (at the frontier)
 
 DIFFICULTY_RANGES = {
     "All":                  (0, 999999),
@@ -514,16 +549,57 @@ def get_next():
         st.session_state.clue_start_time = time.time()
         row = df.iloc[st.session_state.idx]
         st.session_state.current_tag = get_tag_for_clue(row)
+        st.session_state.history_pos = -1   # back at frontier
         st.session_state.initialized = True
 
+def _push_history(df_idx, tag, correct, clue_value, user_answer, match_result):
+    """Push a completed clue onto the history stack (max 25)."""
+    entry = {
+        "df_idx":       df_idx,
+        "tag":          tag,
+        "correct":      correct,
+        "clue_value":   clue_value,
+        "user_answer":  user_answer,
+        "match_result": match_result,
+    }
+    hist = st.session_state.clue_history
+    hist.append(entry)
+    if len(hist) > 25:
+        hist.pop(0)
+    st.session_state.clue_history = hist
+
+def _recalculate_from_history():
+    """Recompute stats and winnings from scratch using the full history."""
+    stats = {cat: {"correct": 0, "total": 0} for cat in ALL_TAGS}
+    winnings = 0
+    for entry in st.session_state.clue_history:
+        cat = entry["tag"]
+        if cat not in stats:
+            stats[cat] = {"correct": 0, "total": 0}
+        stats[cat]["total"] += 1
+        if entry["correct"]:
+            stats[cat]["correct"] += 1
+            winnings += entry["clue_value"]
+        else:
+            winnings -= entry["clue_value"]
+    return stats, winnings
+
 def record_and_advance(correct: bool, clue_value: int, u_cat: str):
-    """Centralized scoring + question count increment, then get next clue."""
+    """Score current clue, push to history, then get next clue."""
+    _push_history(
+        df_idx      = st.session_state.idx,
+        tag         = u_cat,
+        correct     = correct,
+        clue_value  = clue_value,
+        user_answer = st.session_state.get("user_answer", ""),
+        match_result= st.session_state.match_result,
+    )
     if correct:
         st.session_state.stats[u_cat]["correct"] += 1
         st.session_state.winnings += clue_value
-    st.session_state.stats[u_cat]["total"] += 1
-    if not correct:
+    else:
         st.session_state.winnings -= clue_value
+    st.session_state.stats[u_cat]["total"] += 1
     _save_game_stats(st.session_state.stats, st.session_state.winnings)
     st.session_state.question_num += 1
     limit = st.session_state.settings["session_length"]
@@ -577,37 +653,79 @@ with tab_game:
         if not st.session_state.initialized:
             get_next()
 
-        clue          = df.iloc[st.session_state.idx]
-        u_cat         = st.session_state.current_tag
-        _raw_value    = int(clue.get('clue_value') or 0)
-        clue_value    = _raw_value if _raw_value > 0 else 0
-        clue_value_display = "Final Jeopardy" if _raw_value == 0 else f"${_raw_value}"
-        close_enough_on = st.session_state.settings["close_enough"]
-        correct_response = str(clue['question'])
-        timer_on      = close_enough_on and st.session_state.settings["timer_enabled"]
-        timer_limit   = st.session_state.settings["timer_seconds"]
-        session_limit = st.session_state.settings["session_length"]
+        # ── Determine if we're viewing a history entry or the live clue ──────
+        hist     = st.session_state.clue_history
+        hist_pos = st.session_state.history_pos   # -1 = live frontier
+        at_frontier = (hist_pos == -1)
 
-    # ── QUESTION COUNTER & TIMER BAR ──────────────────────────────────────
-    header_left, header_right = st.columns([2, 1])
-    with header_left:
-        if session_limit > 0:
-            st.caption(f"Question **{st.session_state.question_num + 1}** of **{session_limit}**")
+        if at_frontier:
+            clue      = df.iloc[st.session_state.idx]
+            u_cat     = st.session_state.current_tag
         else:
-            st.caption(f"Question **{st.session_state.question_num + 1}**")
+            entry     = hist[hist_pos]
+            clue      = df.iloc[entry["df_idx"]]
+            u_cat     = entry["tag"]
 
-    # Timer logic (only in close enough mode, only before answer submitted)
-    elapsed = 0
-    time_left = timer_limit
-    timed_out = st.session_state.get('timed_out', False)
+        _raw_value         = int(clue.get('clue_value') or 0)
+        clue_value         = _raw_value if _raw_value > 0 else 0
+        clue_value_display = "Final Jeopardy" if _raw_value == 0 else f"${_raw_value}"
+        close_enough_on    = st.session_state.settings["close_enough"]
+        correct_response   = str(clue['question'])
+        timer_on           = close_enough_on and st.session_state.settings["timer_enabled"] and at_frontier
+        timer_limit        = st.session_state.settings["timer_seconds"]
+        session_limit      = st.session_state.settings["session_length"]
 
-    if timer_on and st.session_state.clue_start_time and not st.session_state.show:
-        elapsed   = time.time() - st.session_state.clue_start_time
-        time_left = max(0, timer_limit - elapsed)
-        timed_out = st.session_state.get('timed_out', False)
+        # ── BACK / FORWARD NAV BAR ────────────────────────────────────────────
+        can_go_back    = len(hist) > 0 and hist_pos != 0
+        can_go_forward = hist_pos != -1
 
-    with header_right:
-        if timer_on and not st.session_state.show:
+        nav_c1, nav_c2, nav_c3 = st.columns([1, 3, 1])
+        with nav_c1:
+            if st.button("← Back", disabled=not can_go_back,
+                         use_container_width=True, key="trainer_back"):
+                if hist_pos == -1:
+                    st.session_state.history_pos = len(hist) - 1
+                else:
+                    st.session_state.history_pos = hist_pos - 1
+                st.rerun()
+        with nav_c2:
+            if not at_frontier:
+                st.markdown(
+                    f"<div style='text-align:center;color:#9090B0;padding-top:6px;"
+                    f"font-size:13px;font-weight:600;'>"
+                    f"Reviewing clue {hist_pos + 1} of {len(hist)} — "
+                    f"<span style='color:#F0B429'>history</span></div>",
+                    unsafe_allow_html=True,
+                )
+            else:
+                pos_label = f"Q {st.session_state.question_num + 1}"
+                if session_limit > 0:
+                    pos_label += f" of {session_limit}"
+                st.markdown(
+                    f"<div style='text-align:center;color:#9090B0;padding-top:6px;"
+                    f"font-size:13px;font-weight:600;'>{pos_label}</div>",
+                    unsafe_allow_html=True,
+                )
+        with nav_c3:
+            if st.button("Forward →", disabled=not can_go_forward,
+                         use_container_width=True, key="trainer_fwd"):
+                if hist_pos == len(hist) - 1:
+                    st.session_state.history_pos = -1
+                else:
+                    st.session_state.history_pos = hist_pos + 1
+                st.rerun()
+
+        # ── QUESTION COUNTER & TIMER BAR ──────────────────────────────────────
+        elapsed   = 0
+        time_left = timer_limit
+        timed_out = st.session_state.get('timed_out', False) if at_frontier else entry.get("timed_out", False)
+
+        if timer_on and st.session_state.clue_start_time and not st.session_state.show:
+            elapsed   = time.time() - st.session_state.clue_start_time
+            time_left = max(0, timer_limit - elapsed)
+            timed_out = st.session_state.get('timed_out', False)
+
+        if timer_on and not (st.session_state.show if at_frontier else True):
             elapsed_display = min(elapsed, timer_limit)
             remaining = max(0, timer_limit - elapsed_display)
             color = "#22c55e" if remaining > timer_limit * 0.4 else ("#f59e0b" if remaining > timer_limit * 0.2 else "#ef4444")
@@ -616,117 +734,152 @@ with tab_game:
                 unsafe_allow_html=True
             )
 
-    # Timer progress bar - static display, no auto-refresh
-    # Timer expires are caught when the user submits or on next natural rerun
-    if timer_on and not st.session_state.show and not timed_out:
-        st.progress(max(0.0, time_left / timer_limit))
+        if timer_on and not st.session_state.show and not timed_out:
+            st.progress(max(0.0, time_left / timer_limit))
 
-    # ── CLUE DISPLAY ──────────────────────────────────────────────────────
-    st.markdown(f'<div class="category-box"><div class="category-text">{clue["category"]}</div></div>', unsafe_allow_html=True)
-    st.markdown(f"### {clue['answer']}")
-    st.caption(f"Season {clue['season']} | {clue_value_display}")
+        # ── CLUE DISPLAY ──────────────────────────────────────────────────────
+        st.markdown(f'<div class="category-box"><div class="category-text">{clue["category"]}</div></div>', unsafe_allow_html=True)
+        st.markdown(f"### {clue['answer']}")
+        st.caption(f"Season {clue['season']} | {clue_value_display}")
 
-    # Always-visible tag selector
-    sorted_tags = sorted([t for t in ALL_TAGS if t != "Other"]) + ["Other"]
-    selected_tag = st.selectbox(
-        "Study Tag",
-        options=sorted_tags,
-        index=sorted_tags.index(u_cat) if u_cat in sorted_tags else 0,
-        key=f"retag_select_{st.session_state.idx}",
-        label_visibility="collapsed"
-    )
-    if selected_tag != st.session_state.current_tag:
-        # Save override to Supabase and update local cache
-        cid = _clue_id(clue)
-        _save_tag_override(cid, selected_tag)
-        if "tag_cache" in st.session_state:
-            st.session_state.tag_cache[cid] = selected_tag
-        st.session_state.current_tag = selected_tag
-        u_cat = selected_tag
-        st.rerun()
-
-    # ── CLOSE ENOUGH MODE ─────────────────────────────────────────────────
-    if close_enough_on:
-        if not st.session_state.show:
-            user_ans = st.text_input(
-                "Your answer:",
-                value=st.session_state.get("user_answer", ""),
-                placeholder="Type your response and press Enter or Check Answer...",
-                key=f"ans_input_{st.session_state.idx}",
-            )
-            if st.button("CHECK ANSWER", use_container_width=True, type="primary"):
-                # Re-check elapsed at submission time
-                elapsed_now = time.time() - st.session_state.clue_start_time if st.session_state.clue_start_time else 0
-                if timer_on and elapsed_now > timer_limit:
-                    st.session_state.timed_out = True
-                    st.session_state.user_answer = user_ans or "⏰ Time's up!"
-                    st.session_state.match_result = (False, 0)
-                else:
-                    is_correct, score = fuzzy_match(
-                        user_ans, correct_response,
-                        threshold=st.session_state.settings["close_enough_threshold"]
-                    )
-                    st.session_state.user_answer = user_ans
-                    st.session_state.match_result = (is_correct, score)
-                st.session_state.show = True
-                st.rerun()
-        else:
-            result     = st.session_state.match_result
-            is_correct, score = result if result else (None, 0)
-
-            st.success(f"RESPONSE: {correct_response.upper()}")
-
-            if timed_out:
-                st.error(f"⏰ Time's up! ({timer_limit}s limit)")
-            elif is_correct:
-                st.success(f"✅ Match! Similarity: {score}%  |  You wrote: *\"{st.session_state.user_answer}\"*")
+        # ── TAG SELECTOR ──────────────────────────────────────────────────────
+        sorted_tags  = sorted([t for t in ALL_TAGS if t != "Other"]) + ["Other"]
+        selected_tag = st.selectbox(
+            "Study Tag",
+            options=sorted_tags,
+            index=sorted_tags.index(u_cat) if u_cat in sorted_tags else 0,
+            key=f"retag_select_{st.session_state.idx}_{hist_pos}",
+            label_visibility="collapsed"
+        )
+        tag_changed = selected_tag != u_cat
+        if tag_changed:
+            cid = _clue_id(clue)
+            _save_tag_override(cid, selected_tag)
+            if "tag_cache" in st.session_state:
+                st.session_state.tag_cache[cid] = selected_tag
+            if at_frontier:
+                st.session_state.current_tag = selected_tag
             else:
-                st.error(f"❌ No match. Similarity: {score}%  |  You wrote: *\"{st.session_state.user_answer}\"*")
+                hist[hist_pos]["tag"] = selected_tag
+                st.session_state.clue_history = hist
+            u_cat = selected_tag
+            st.rerun()
 
-            # Primary next button (accepts auto-grade)
-            next_label = "➡️ NEXT (Correct)" if is_correct else "➡️ NEXT (Wrong)"
-            if st.button(next_label, use_container_width=True, type="primary"):
-                record_and_advance(bool(is_correct), clue_value, u_cat)
-                st.rerun()
-
-            # Manual overrides
-            st.caption("Override auto-grade:")
-            c1, c2, c3 = st.columns(3)
-            with c1:
-                if st.button("✅ Mark Correct", use_container_width=True):
-                    record_and_advance(True, clue_value, u_cat)
-                    st.rerun()
-            with c2:
-                if st.button("❌ Mark Wrong", use_container_width=True):
-                    record_and_advance(False, clue_value, u_cat)
-                    st.rerun()
-            with c3:
-                if st.button("⏭️ Skip", use_container_width=True):
-                    st.session_state.question_num += 1
-                    limit = st.session_state.settings["session_length"]
-                    if limit > 0 and st.session_state.question_num >= limit:
-                        st.session_state.session_active = False
-                    else:
-                        get_next()
-                    st.rerun()
-
-    # ── CLASSIC (SELF-REPORT) MODE ────────────────────────────────────────
-    else:
-        if not st.session_state.show:
-            if st.button("REVEAL RESPONSE", use_container_width=True, type="primary"):
-                st.session_state.show = True
-                st.rerun()
-        else:
+        # ── HISTORY MODE: show result + allow re-rating ───────────────────────
+        if not at_frontier:
+            prev_correct = entry["correct"]
+            st.info(f"{'✅ You got this correct' if prev_correct else '❌ You missed this'} — clue value: {clue_value_display}")
             st.success(f"RESPONSE: {correct_response.upper()}")
-            c1, c2 = st.columns(2)
-            with c1:
-                if st.button("✅ I GOT IT", use_container_width=True):
-                    record_and_advance(True, clue_value, u_cat)
+            if entry.get("user_answer"):
+                st.caption(f"Your answer was: *\"{entry['user_answer']}\"*")
+
+            st.markdown("**Change your rating:**")
+            rc1, rc2, rc3 = st.columns(3)
+            with rc1:
+                if st.button("✅ Mark Correct", use_container_width=True, key="hist_correct"):
+                    if not prev_correct:
+                        hist[hist_pos]["correct"] = True
+                        st.session_state.clue_history = hist
+                        new_stats, new_winnings = _recalculate_from_history()
+                        st.session_state.stats    = new_stats
+                        st.session_state.winnings = new_winnings
+                        _save_game_stats(new_stats, new_winnings)
                     st.rerun()
-            with c2:
-                if st.button("❌ I MISSED IT", use_container_width=True):
-                    record_and_advance(False, clue_value, u_cat)
+            with rc2:
+                if st.button("❌ Mark Wrong", use_container_width=True, key="hist_wrong"):
+                    if prev_correct:
+                        hist[hist_pos]["correct"] = False
+                        st.session_state.clue_history = hist
+                        new_stats, new_winnings = _recalculate_from_history()
+                        st.session_state.stats    = new_stats
+                        st.session_state.winnings = new_winnings
+                        _save_game_stats(new_stats, new_winnings)
                     st.rerun()
+            with rc3:
+                if st.button("▶ Back to Current", use_container_width=True,
+                             type="primary", key="hist_resume"):
+                    st.session_state.history_pos = -1
+                    st.rerun()
+
+        # ── LIVE MODE: normal answer/rating flow ──────────────────────────────
+        elif close_enough_on:
+            if not st.session_state.show:
+                user_ans = st.text_input(
+                    "Your answer:",
+                    value=st.session_state.get("user_answer", ""),
+                    placeholder="Type your response and press Enter or Check Answer...",
+                    key=f"ans_input_{st.session_state.idx}",
+                )
+                if st.button("CHECK ANSWER", use_container_width=True, type="primary"):
+                    elapsed_now = time.time() - st.session_state.clue_start_time if st.session_state.clue_start_time else 0
+                    if timer_on and elapsed_now > timer_limit:
+                        st.session_state.timed_out    = True
+                        st.session_state.user_answer  = user_ans or "⏰ Time's up!"
+                        st.session_state.match_result = (False, 0)
+                    else:
+                        is_correct, score = fuzzy_match(
+                            user_ans, correct_response,
+                            threshold=st.session_state.settings["close_enough_threshold"]
+                        )
+                        st.session_state.user_answer  = user_ans
+                        st.session_state.match_result = (is_correct, score)
+                    st.session_state.show = True
+                    st.rerun()
+            else:
+                result     = st.session_state.match_result
+                is_correct, score = result if result else (None, 0)
+
+                st.success(f"RESPONSE: {correct_response.upper()}")
+
+                if timed_out:
+                    st.error(f"⏰ Time's up! ({timer_limit}s limit)")
+                elif is_correct:
+                    st.success(f"✅ Match! Similarity: {score}%  |  You wrote: *\"{st.session_state.user_answer}\"*")
+                else:
+                    st.error(f"❌ No match. Similarity: {score}%  |  You wrote: *\"{st.session_state.user_answer}\"*")
+
+                next_label = "➡️ NEXT (Correct)" if is_correct else "➡️ NEXT (Wrong)"
+                if st.button(next_label, use_container_width=True, type="primary"):
+                    record_and_advance(bool(is_correct), clue_value, u_cat)
+                    st.rerun()
+
+                st.caption("Override auto-grade:")
+                c1, c2, c3 = st.columns(3)
+                with c1:
+                    if st.button("✅ Mark Correct", use_container_width=True):
+                        record_and_advance(True, clue_value, u_cat)
+                        st.rerun()
+                with c2:
+                    if st.button("❌ Mark Wrong", use_container_width=True):
+                        record_and_advance(False, clue_value, u_cat)
+                        st.rerun()
+                with c3:
+                    if st.button("⏭️ Skip", use_container_width=True):
+                        st.session_state.question_num += 1
+                        limit = st.session_state.settings["session_length"]
+                        if limit > 0 and st.session_state.question_num >= limit:
+                            st.session_state.session_active = False
+                        else:
+                            get_next()
+                        st.rerun()
+
+        else:
+            # Classic self-report mode
+            if not st.session_state.show:
+                if st.button("REVEAL RESPONSE", use_container_width=True, type="primary"):
+                    st.session_state.show = True
+                    st.rerun()
+            else:
+                st.success(f"RESPONSE: {correct_response.upper()}")
+                c1, c2 = st.columns(2)
+                with c1:
+                    if st.button("✅ I GOT IT", use_container_width=True):
+                        record_and_advance(True, clue_value, u_cat)
+                        st.rerun()
+                with c2:
+                    if st.button("❌ I MISSED IT", use_container_width=True):
+                        record_and_advance(False, clue_value, u_cat)
+                        st.rerun()
 
 # --- 7. SIDEBAR ---
 st.sidebar.title("📊 Training Progress")
