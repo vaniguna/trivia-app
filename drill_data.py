@@ -8,6 +8,8 @@ Each deck is a dict with:
 """
 
 from presidents_deck import PRESIDENTS_DECK
+from revolutionary_war_deck import REVOLUTIONARY_WAR_DECK
+from civil_war_deck import CIVIL_WAR_DECK
 
 DRILL_DECKS = [
 
@@ -71,6 +73,8 @@ DRILL_DECKS = [
     },
 
     PRESIDENTS_DECK,
+    REVOLUTIONARY_WAR_DECK,
+    CIVIL_WAR_DECK,
 
     # ─────────────────────────────────────────────────────────────────────────
     {
