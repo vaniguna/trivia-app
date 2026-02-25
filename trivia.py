@@ -357,7 +357,7 @@ def get_tag_for_clue(row) -> str:
 
 
 # Presidents whose last name alone is ambiguous (multiple presidents share it)
-SHARED_SURNAMES = {"adams", "harrison", "johnson", "roosevelt", "tyler", "bush"}
+SHARED_SURNAMES = {"adams", "harrison", "johnson", "roosevelt", "bush"}
 
 # Known aliases → canonical form used for matching
 PRESIDENT_ALIASES = {
@@ -380,8 +380,9 @@ def normalize(text):
 def fuzzy_match(user_ans, correct_ans, threshold=75):
     """
     Returns (is_correct: bool, score: int).
-    - Rejects ambiguous shared presidential surnames (Adams, Harrison, Johnson,
-      Roosevelt, Tyler, Bush) unless a first name is also provided.
+    - Accepts a single last name as correct UNLESS it's on the shared-surname
+      list (Adams, Harrison, Johnson, Roosevelt, Tyler, Bush) — those require
+      a first name.
     - Accepts aliases: JFK, FDR, LBJ, Teddy (Roosevelt), Ike (Eisenhower).
     - Otherwise uses character-level fuzzy similarity.
     """
@@ -392,21 +393,28 @@ def fuzzy_match(user_ans, correct_ans, threshold=75):
     if not u_raw:
         return False, 0
 
-    # Reject bare shared surname (e.g. "Roosevelt" with no first name)
+    # Reject bare shared surname (e.g. "Roosevelt" or "Bush" with no first name)
     parts = u_raw.split()
     if len(parts) == 1 and parts[0] in SHARED_SURNAMES:
         return False, 0
 
-    # Expand known aliases
+    # Expand known aliases (jfk → john kennedy, etc.)
     u = PRESIDENT_ALIASES.get(u_raw, u_raw)
 
-    # Alias substring match
-    if u in c_norm or c_norm in u:
+    # Exact / substring match after alias expansion
+    if u == c_norm or u in c_norm or c_norm in u:
         return True, 100
 
+    # Last-name match: if the user typed a single word, check if it matches
+    # any word in the correct answer (handles "Ford" matching "Gerald Ford")
+    u_parts = u.split()
+    c_parts = c_norm.split()
+    if len(u_parts) == 1 and u_parts[0] in c_parts:
+        return True, 100
+
+    # Full fuzzy similarity
     ratio = difflib.SequenceMatcher(None, u, c_norm).ratio() * 100
-    contained = (u in c_norm) or (c_norm in u)
-    score = int(max(ratio, 100 if contained else 0))
+    score = int(ratio)
     return score >= threshold, min(score, 100)
 
 # --- 3. CUSTOM CSS ---
