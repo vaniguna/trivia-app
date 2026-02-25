@@ -639,17 +639,17 @@ def _render_card(srs):
         def _on_answer_submit():
             val = st.session_state.get(f"drill_input_{idx}", "")
             if val:
-                st.session_state.drill_user_ans = val
+                st.session_state.drill_user_ans      = val
                 st.session_state._drill_enter_submitted = True
 
-        user_ans = st.text_input(
+        st.text_input(
             "Your answer:",
-            value=st.session_state.drill_user_ans,
             placeholder="Type your answer and press Enter…",
             key=f"drill_input_{idx}",
             label_visibility="collapsed",
             on_change=_on_answer_submit,
         )
+        user_ans = st.session_state.get(f"drill_input_{idx}", "")
 
         # Handle Enter-key submission
         if st.session_state.get("_drill_enter_submitted"):
@@ -664,9 +664,10 @@ def _render_card(srs):
         with col_check:
             if st.button("✓ Check Answer", type="primary", use_container_width=True,
                          key=f"check_{idx}"):
-                st.session_state.drill_user_ans = user_ans
-                sim = _similarity(user_ans, card["a"])
-                st.session_state.drill_result   = ("check", sim, user_ans)
+                ans = user_ans
+                st.session_state.drill_user_ans = ans
+                sim = _similarity(ans, card["a"])
+                st.session_state.drill_result   = ("check", sim, ans)
                 st.session_state.drill_show_ans = True
                 st.rerun()
         with col_reveal:
