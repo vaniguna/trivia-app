@@ -261,7 +261,14 @@ def _find_first_unmastered(deck: dict, srs: dict, queue: list) -> int:
 
 # ─── Fuzzy grading ────────────────────────────────────────────────────────────
 
-_SHARED_SURNAMES = {"adams", "harrison", "johnson", "roosevelt", "bush"}
+_SHARED_SURNAMES = {
+    # Presidents deck: two presidents each
+    "adams", "harrison", "johnson", "roosevelt", "bush",
+    # Revolutionary War deck: John Adams + Samuel Adams
+    # (adams already covered above)
+    # Civil War deck: Andrew Johnson (president) + Albert Sidney Johnston (general)
+    "johnston",
+}
 _PRESIDENT_ALIASES = {
     "jfk":             "john kennedy",
     "fdr":             "franklin roosevelt",
@@ -629,13 +636,30 @@ def _render_card(srs):
 
     # ── Answer phase ──────────────────────────────────────────────────────────
     if not st.session_state.drill_show_ans:
+        def _on_answer_submit():
+            val = st.session_state.get(f"drill_input_{idx}", "")
+            if val:
+                st.session_state.drill_user_ans = val
+                st.session_state._drill_enter_submitted = True
+
         user_ans = st.text_input(
             "Your answer:",
             value=st.session_state.drill_user_ans,
-            placeholder="Type your answer…",
+            placeholder="Type your answer and press Enter…",
             key=f"drill_input_{idx}",
             label_visibility="collapsed",
+            on_change=_on_answer_submit,
         )
+
+        # Handle Enter-key submission
+        if st.session_state.get("_drill_enter_submitted"):
+            st.session_state._drill_enter_submitted = False
+            ans = st.session_state.drill_user_ans
+            sim = _similarity(ans, card["a"])
+            st.session_state.drill_result   = ("check", sim, ans)
+            st.session_state.drill_show_ans = True
+            st.rerun()
+
         col_check, col_reveal = st.columns([3, 1])
         with col_check:
             if st.button("✓ Check Answer", type="primary", use_container_width=True,
