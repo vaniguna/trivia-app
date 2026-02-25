@@ -815,12 +815,38 @@ with tab_game:
         # ── LIVE MODE: normal answer/rating flow ──────────────────────────────
         elif close_enough_on:
             if not st.session_state.show:
+                def _on_trainer_submit():
+                    val = st.session_state.get(f"ans_input_{st.session_state.idx}", "")
+                    if val:
+                        st.session_state._trainer_enter_submitted = True
+
                 user_ans = st.text_input(
                     "Your answer:",
                     value=st.session_state.get("user_answer", ""),
                     placeholder="Type your response and press Enter or Check Answer...",
                     key=f"ans_input_{st.session_state.idx}",
+                    on_change=_on_trainer_submit,
                 )
+
+                # Handle Enter-key submission
+                if st.session_state.get("_trainer_enter_submitted"):
+                    st.session_state._trainer_enter_submitted = False
+                    elapsed_now = time.time() - st.session_state.clue_start_time if st.session_state.clue_start_time else 0
+                    ans = st.session_state.get(f"ans_input_{st.session_state.idx}", "")
+                    if timer_on and elapsed_now > timer_limit:
+                        st.session_state.timed_out    = True
+                        st.session_state.user_answer  = ans or "⏰ Time's up!"
+                        st.session_state.match_result = (False, 0)
+                    else:
+                        is_correct, score = fuzzy_match(
+                            ans, correct_response,
+                            threshold=st.session_state.settings["close_enough_threshold"]
+                        )
+                        st.session_state.user_answer  = ans
+                        st.session_state.match_result = (is_correct, score)
+                    st.session_state.show = True
+                    st.rerun()
+
                 if st.button("CHECK ANSWER", use_container_width=True, type="primary"):
                     elapsed_now = time.time() - st.session_state.clue_start_time if st.session_state.clue_start_time else 0
                     if timer_on and elapsed_now > timer_limit:
