@@ -401,9 +401,12 @@ def fuzzy_match(user_ans, correct_ans, threshold=75):
     # Expand known aliases (jfk → john kennedy, etc.)
     u = PRESIDENT_ALIASES.get(u_raw, u_raw)
 
-    # Exact / substring match after alias expansion
-    if u == c_norm or u in c_norm or c_norm in u:
-        return True, 100
+    # Exact / substring match — also try stripping middle initials from correct answer
+    c_no_initials = re.sub(r'\b[a-z]\b', '', c_norm).strip()
+    c_no_initials = re.sub(r'\s+', ' ', c_no_initials).strip()
+    for c_variant in [c_norm, c_no_initials]:
+        if u == c_variant or u in c_variant or c_variant in u:
+            return True, 100
 
     # Last-name match: if the user typed a single word, check if it matches
     # any word in the correct answer (handles "Ford" matching "Gerald Ford")
