@@ -261,6 +261,16 @@ def _find_first_unmastered(deck: dict, srs: dict, queue: list) -> int:
 
 # ─── Fuzzy grading ────────────────────────────────────────────────────────────
 
+_SHARED_SURNAMES = {"adams", "harrison", "johnson", "roosevelt", "bush"}
+_PRESIDENT_ALIASES = {
+    "jfk":             "john kennedy",
+    "fdr":             "franklin roosevelt",
+    "lbj":             "lyndon johnson",
+    "teddy":           "theodore roosevelt",
+    "teddy roosevelt": "theodore roosevelt",
+    "ike":             "eisenhower",
+}
+
 def _normalize(text: str) -> str:
     t = text.lower().strip()
     t = re.sub(r'\b(a|an|the)\b', '', t)
@@ -268,16 +278,49 @@ def _normalize(text: str) -> str:
     return re.sub(r'\s+', ' ', t).strip()
 
 def _similarity(a: str, b: str) -> int:
-    a, b = list(_normalize(a)), list(_normalize(b))
-    if not a or not b:
+    """
+    Returns 0-100 similarity score.
+    - Bare shared presidential surnames (Adams, Harrison, Johnson, Roosevelt,
+      Bush) return 0 — first name required.
+    - Aliases (JFK, FDR, LBJ, Teddy, Ike) are expanded before matching.
+    - A single word that exactly matches any word in the correct answer scores 100
+      (handles "Nixon" matching "Richard Nixon").
+    """
+    u_raw = _normalize(a)
+    c_norm = _normalize(b)
+    if not u_raw or not c_norm:
         return 0
-    m, n = len(a), len(b)
+
+    # Reject bare shared surname
+    parts = u_raw.split()
+    if len(parts) == 1 and parts[0] in _SHARED_SURNAMES:
+        return 0
+
+    # Expand aliases
+    u = _PRESIDENT_ALIASES.get(u_raw, u_raw)
+
+    # Exact or substring match (also try stripping middle initials from correct)
+    c_no_initials = re.sub(r'\b[a-z]\b', '', c_norm).strip()
+    c_no_initials = re.sub(r'\s+', ' ', c_no_initials).strip()
+    for c_variant in [c_norm, c_no_initials]:
+        if u == c_variant or u in c_variant or c_variant in u:
+            return 100
+
+    # Single-word last-name match against any word in correct answer
+    u_parts = u.split()
+    c_parts = c_norm.split()
+    if len(u_parts) == 1 and u_parts[0] in c_parts:
+        return 100
+
+    # Character-level edit distance
+    ua, ca = list(u), list(c_norm)
+    m, n = len(ua), len(ca)
     dp = [[0] * (n + 1) for _ in range(m + 1)]
     for i in range(m + 1): dp[i][0] = i
     for j in range(n + 1): dp[0][j] = j
     for i in range(1, m + 1):
         for j in range(1, n + 1):
-            dp[i][j] = dp[i-1][j-1] if a[i-1] == b[j-1] \
+            dp[i][j] = dp[i-1][j-1] if ua[i-1] == ca[j-1] \
                        else 1 + min(dp[i-1][j], dp[i][j-1], dp[i-1][j-1])
     dist = dp[m][n]
     return int((max(m, n) - dist) / max(m, n) * 100)
