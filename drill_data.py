@@ -8,8 +8,16 @@ Each deck is a dict with:
 """
 
 from presidents_deck import PRESIDENTS_DECK
+from vice_presidents_deck import VICE_PRESIDENTS_DECK
 from revolutionary_war_deck import REVOLUTIONARY_WAR_DECK
 from civil_war_deck import CIVIL_WAR_DECK
+from early_american_wars_deck import EARLY_AMERICAN_WARS_DECK
+from pre20c_american_history_deck import PRE20C_AMERICAN_HISTORY_DECK
+from wwi_deck import WWI_DECK
+from wwii_deck import WWII_DECK
+from vietnam_war_deck import VIETNAM_WAR_DECK
+from shakespeare_tragedies_deck import SHAKESPEARE_TRAGEDIES_DECK
+from shakespeare_comedies_histories_deck import SHAKESPEARE_COMEDIES_HISTORIES_DECK
 
 DRILL_DECKS = [
 
@@ -182,43 +190,27 @@ DRILL_DECKS = [
         "icon": "🎭",
         "description": "Plays, characters, quotes, and facts about Shakespeare",
         "cards": [
-            {"q": "Shakespeare's tragedy featuring the Prince of Denmark", "a": "Hamlet"},
-            {"q": "Shakespeare's tragedy about a jealous Moorish general", "a": "Othello"},
-            {"q": "Shakespeare's tragedy about ambition and witches in Scotland", "a": "Macbeth"},
-            {"q": "Shakespeare's tragedy about an aging king dividing his kingdom", "a": "King Lear"},
-            {"q": "Shakespeare's tragedy featuring the 'star-crossed lovers'", "a": "Romeo and Juliet"},
-            {"q": "Shakespeare's play about a Venetian merchant and a pound of flesh", "a": "The Merchant of Venice"},
-            {"q": "Shakespeare's comedy set in the Forest of Arden", "a": "As You Like It"},
-            {"q": "Shakespeare's comedy featuring Oberon, Titania, and Puck", "a": "A Midsummer Night's Dream"},
-            {"q": "Shakespeare's play featuring Prospero, Caliban, and Ariel on an island", "a": "The Tempest"},
-            {"q": "Shakespeare's comedy involving twins and mistaken identity in Ephesus", "a": "The Comedy of Errors"},
-            {"q": "Shakespeare's history play about the English king at Agincourt", "a": "Henry V"},
-            {"q": "Shakespeare's play featuring Julius Caesar's assassination", "a": "Julius Caesar"},
-            {"q": "Shakespeare's tragedy set in ancient Rome; 'Friends, Romans, countrymen'", "a": "Julius Caesar"},
-            {"q": "Shakespeare's comedy featuring Beatrice and Benedick", "a": "Much Ado About Nothing"},
-            {"q": "Shakespeare's play about the Roman general who turns against Rome", "a": "Coriolanus"},
-            {"q": "Hamlet's father's ghost reveals this person murdered him", "a": "Claudius"},
-            {"q": "Hamlet's famous soliloquy begins with these words", "a": "To be, or not to be"},
-            {"q": "Othello's scheming, villainous ensign", "a": "Iago"},
-            {"q": "The witches' famous opening line in Macbeth", "a": "When shall we three meet again"},
-            {"q": "Macbeth's wife who urges him to murder Duncan", "a": "Lady Macbeth"},
-            {"q": "Romeo's family name", "a": "Montague"},
-            {"q": "Juliet's family name", "a": "Capulet"},
-            {"q": "Portia's suitors must choose between caskets of these three metals", "a": "Gold, silver, and lead"},
-            {"q": "King Lear's three daughters", "a": "Goneril, Regan, and Cordelia"},
             {"q": "Shakespeare's birthplace", "a": "Stratford-upon-Avon"},
             {"q": "The theater most associated with Shakespeare in London", "a": "The Globe"},
             {"q": "Shakespeare's four great tragedies", "a": "Hamlet, Othello, Macbeth, King Lear"},
-            {"q": "A mischievous fairy in A Midsummer Night's Dream", "a": "Puck (Robin Goodfellow)"},
-            {"q": "Falstaff first appears in this Shakespeare play", "a": "Henry IV Part 1"},
-            {"q": "Shakespeare's last play, generally considered", "a": "The Tempest"},
             {"q": "Number of sonnets Shakespeare wrote", "a": "154"},
-            {"q": "Shakespeare's sonnets are dedicated to 'Mr. W.H.' — the identity remains what?", "a": "Unknown / disputed"},
-            {"q": "The 'green-eyed monster' Shakespeare coined refers to this emotion", "a": "Jealousy"},
-            {"q": "'All the world's a stage' speech is from this play", "a": "As You Like It"},
             {"q": "Shakespeare's only son's name", "a": "Hamnet"},
         ]
     },
+
+    # ── NEW EXPANDED SHAKESPEARE DECKS ──────────────────────────────────────
+    SHAKESPEARE_TRAGEDIES_DECK,
+    SHAKESPEARE_COMEDIES_HISTORIES_DECK,
+
+    # ── NEW HISTORY & WAR DECKS ──────────────────────────────────────────────
+    VICE_PRESIDENTS_DECK,
+    EARLY_AMERICAN_WARS_DECK,
+    PRE20C_AMERICAN_HISTORY_DECK,
+    WWI_DECK,
+    WWII_DECK,
+    VIETNAM_WAR_DECK,
+
+    # ── EXISTING EXTERNAL DECKS ───────────────────────────────────────────────
 
     # ─────────────────────────────────────────────────────────────────────────
     {
