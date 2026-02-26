@@ -16,6 +16,7 @@ from pre20c_american_history_deck import PRE20C_AMERICAN_HISTORY_DECK
 from wwi_deck import WWI_DECK
 from wwii_deck import WWII_DECK
 from vietnam_war_deck import VIETNAM_WAR_DECK
+from modern_american_history_deck import MODERN_AMERICAN_HISTORY_DECK
 from shakespeare_tragedies_deck import SHAKESPEARE_TRAGEDIES_DECK
 from shakespeare_comedies_histories_deck import SHAKESPEARE_COMEDIES_HISTORIES_DECK
 
@@ -206,6 +207,7 @@ DRILL_DECKS = [
     VICE_PRESIDENTS_DECK,
     EARLY_AMERICAN_WARS_DECK,
     PRE20C_AMERICAN_HISTORY_DECK,
+    MODERN_AMERICAN_HISTORY_DECK,
     WWI_DECK,
     WWII_DECK,
     VIETNAM_WAR_DECK,
