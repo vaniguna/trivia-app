@@ -17,6 +17,9 @@ from wwi_deck import WWI_DECK
 from wwii_deck import WWII_DECK
 from vietnam_war_deck import VIETNAM_WAR_DECK
 from modern_american_history_deck import MODERN_AMERICAN_HISTORY_DECK
+from korean_war_deck import KOREAN_WAR_DECK
+from cold_war_deck import COLD_WAR_DECK
+from gulf_war_deck import GULF_WAR_DECK
 from shakespeare_tragedies_deck import SHAKESPEARE_TRAGEDIES_DECK
 from shakespeare_comedies_histories_deck import SHAKESPEARE_COMEDIES_HISTORIES_DECK
 
@@ -211,6 +214,9 @@ DRILL_DECKS = [
     WWI_DECK,
     WWII_DECK,
     VIETNAM_WAR_DECK,
+    KOREAN_WAR_DECK,
+    COLD_WAR_DECK,
+    GULF_WAR_DECK,
 
     # ── EXISTING EXTERNAL DECKS ───────────────────────────────────────────────
 
