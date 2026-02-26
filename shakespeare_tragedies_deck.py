@@ -11,8 +11,6 @@ SHAKESPEARE_TRAGEDIES_DECK = {
     "cards": [
 
         # ── HAMLET ────────────────────────────────────────────────────────────
-        {"q": "Shakespeare's tragedy featuring the Prince of Denmark", "a": "Hamlet"},
-        {"q": "Hamlet's famous opening soliloquy begins with these words", "a": "To be, or not to be"},
         {"q": "Hamlet's full 'To be or not to be' soliloquy appears in this act", "a": "Act III"},
         {"q": "Hamlet's father's ghost reveals this person murdered him", "a": "Claudius"},
         {"q": "Hamlet's treacherous uncle who killed his father and married his mother", "a": "Claudius"},
@@ -34,10 +32,8 @@ SHAKESPEARE_TRAGEDIES_DECK = {
         {"q": "Number of major characters who die in the final scene of Hamlet", "a": "Four (Gertrude, Laertes, Claudius, Hamlet)"},
 
         # ── MACBETH ───────────────────────────────────────────────────────────
-        {"q": "Shakespeare's tragedy about ambition and witches in Scotland", "a": "Macbeth"},
         {"q": "The three witches' opening line in Macbeth", "a": "When shall we three meet again"},
         {"q": "The three witches' famous chant beginning 'Double, double toil and trouble'", "a": "Fire burn and cauldron bubble"},
-        {"q": "Macbeth's wife who urges him to murder King Duncan", "a": "Lady Macbeth"},
         {"q": "Lady Macbeth's famous sleepwalking scene involves her trying to wash this off her hands", "a": "Blood (imaginary blood)"},
         {"q": "Lady Macbeth's line: 'Out, damned ___!'", "a": "Spot"},
         {"q": "The witches' prophecy tells Macbeth he cannot be killed by any man born of this", "a": "Woman"},
